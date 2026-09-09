@@ -1,0 +1,1152 @@
+openapi: 3.1.0
+info:
+  title: AIWM Docker GPU Control Plane API
+  version: 0.3.0
+  description: 'Brownfield-safe control plane for standalone Docker GPU servers. Agent
+    APIs
+
+    are machine-to-machine; resource and job APIs are consumed by the web app.
+
+    '
+servers:
+- url: http://localhost:8080
+tags:
+- name: System
+- name: Agents
+- name: Inventory
+- name: Jobs
+- name: Scheduler
+paths:
+  /healthz:
+    get:
+      tags:
+      - System
+      operationId: health
+      responses:
+        '200':
+          description: Process is alive
+      security: []
+  /readyz:
+    get:
+      tags:
+      - System
+      operationId: ready
+      responses:
+        '200':
+          description: Process can serve traffic
+      security: []
+  /api/v1/system/summary:
+    get:
+      tags:
+      - System
+      operationId: getClusterSummary
+      responses:
+        '200':
+          description: Logical resource pool summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ClusterSummary'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/agents/register:
+    post:
+      tags:
+      - Agents
+      operationId: registerAgent
+      parameters:
+      - in: header
+        name: X-Enrollment-Token
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterAgentRequest'
+      responses:
+        '201':
+          description: Agent registered; the returned token is used as Bearer authentication
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RegisterAgentResponse'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+      security: []
+  /api/v1/agents/{agentID}/heartbeat:
+    post:
+      tags:
+      - Agents
+      operationId: heartbeat
+      security:
+      - agentBearer: []
+      parameters:
+      - $ref: '#/components/parameters/AgentID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                observedAt:
+                  type: string
+                  format: date-time
+      responses:
+        '200':
+          description: Heartbeat accepted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/agents/{agentID}/inventory:
+    put:
+      tags:
+      - Agents
+      operationId: replaceInventory
+      security:
+      - agentBearer: []
+      parameters:
+      - $ref: '#/components/parameters/AgentID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InventoryReport'
+      responses:
+        '200':
+          description: Full observed-state snapshot accepted
+        '409':
+          description: Inventory sequence is stale
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/agents/{agentID}/commands:
+    get:
+      tags:
+      - Agents
+      operationId: leaseCommands
+      security:
+      - agentBearer: []
+      parameters:
+      - $ref: '#/components/parameters/AgentID'
+      - in: query
+        name: limit
+        schema:
+          type: integer
+          default: 10
+          maximum: 100
+      responses:
+        '200':
+          description: Commands leased to this agent; execution is idempotent by command
+            id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AgentCommand'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/agents/{agentID}/commands/{commandID}/ack:
+    post:
+      tags:
+      - Agents
+      operationId: acknowledgeCommand
+      security:
+      - agentBearer: []
+      parameters:
+      - $ref: '#/components/parameters/AgentID'
+      - in: path
+        name: commandID
+        required: true
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandAck'
+      responses:
+        '200':
+          description: Command result recorded
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/servers:
+    get:
+      tags:
+      - Inventory
+      operationId: listServers
+      responses:
+        '200':
+          description: Registered Docker GPU servers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Server'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/servers/{serverID}:
+    get:
+      tags:
+      - Inventory
+      operationId: getServer
+      parameters:
+      - $ref: '#/components/parameters/ServerID'
+      responses:
+        '200':
+          description: Server with GPU and container inventory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Server'
+                required:
+                - data
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/servers/{serverID}/drain:
+    post:
+      tags:
+      - Inventory
+      operationId: setServerDrained
+      parameters:
+      - $ref: '#/components/parameters/ServerID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - drained
+              properties:
+                drained:
+                  type: boolean
+      responses:
+        '200':
+          description: Scheduling state changed; running containers are untouched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Server'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/gpus:
+    get:
+      tags:
+      - Inventory
+      operationId: listGPUs
+      responses:
+        '200':
+          description: GPUs across all Docker servers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GPUInventoryItem'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/containers:
+    get:
+      tags:
+      - Inventory
+      operationId: listContainers
+      parameters:
+      - in: query
+        name: origin
+        schema:
+          type: string
+          enum:
+          - MANAGED
+          - LEGACY
+          - UNKNOWN
+      responses:
+        '200':
+          description: Observed containers; LEGACY containers are read-only to AIWM
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ContainerInventoryItem'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/jobs:
+    get:
+      tags:
+      - Jobs
+      operationId: listJobs
+      responses:
+        '200':
+          description: Submitted managed jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    post:
+      tags:
+      - Jobs
+      operationId: createJob
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '201':
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Job'
+                required:
+                - data
+        '400':
+          description: Invalid resource request
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/jobs/{jobID}:
+    get:
+      tags:
+      - Jobs
+      operationId: getJob
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      responses:
+        '200':
+          description: Job state and assignment
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Job'
+                required:
+                - data
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/jobs/{jobID}/stop:
+    post:
+      tags:
+      - Jobs
+      operationId: stopManagedJob
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      responses:
+        '202':
+          description: Cancel queued/unleased job or queue managed stop. Repeated
+            requests are idempotent; release waits for actual inventory if a command
+            was delivered.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Job'
+                required:
+                - data
+        '409':
+          description: Job is not stoppable
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/queue:
+    get:
+      tags:
+      - Jobs
+      operationId: getQueue
+      responses:
+        '200':
+          description: Jobs sorted by priority descending then submission time
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Job'
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/scheduler/run-once:
+    post:
+      tags:
+      - Scheduler
+      operationId: runSchedulerOnce
+      responses:
+        '200':
+          description: One scheduling cycle completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      assignedJobs: &id002
+                        type: integer
+                    required:
+                    - assignedJobs
+                required:
+                - data
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        default:
+          description: Structured error (400 invalid input, 404 absent, 409 conflict,
+            413 body limit, 500 internal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  securitySchemes:
+    agentBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-agent-token
+    publicBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: operator-api-token
+  parameters:
+    AgentID:
+      in: path
+      name: agentID
+      required: true
+      schema:
+        type: string
+    ServerID:
+      in: path
+      name: serverID
+      required: true
+      schema:
+        type: string
+    JobID:
+      in: path
+      name: jobID
+      required: true
+      schema:
+        type: string
+  responses:
+    Unauthorized:
+      description: Missing or invalid credential for this boundary
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    RegisterAgentRequest:
+      type: object
+      required:
+      - protocolVersion
+      - machineId
+      - name
+      properties:
+        protocolVersion:
+          type: string
+          enum:
+          - v1
+        machineId:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        agentVersion:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+    InventoryReport:
+      type: object
+      required:
+      - sequence
+      - observedAt
+      - gpus
+      - containers
+      properties:
+        sequence:
+          type: integer
+          format: int64
+          minimum: 1
+        observedAt:
+          type: string
+          format: date-time
+        dockerVersion:
+          type: string
+        gpus:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPU'
+        containers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Container'
+        processes:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPUProcess'
+        host:
+          $ref: '#/components/schemas/HostInfo'
+    GPU:
+      type: object
+      required:
+      - uuid
+      - index
+      - model
+      - memoryTotalMiB
+      - memoryUsedMiB
+      - healthy
+      properties:
+        uuid:
+          type: string
+        index:
+          type: integer
+        model:
+          type: string
+        memoryTotalMiB:
+          type: integer
+          format: int64
+        memoryUsedMiB:
+          type: integer
+          format: int64
+        utilizationPct:
+          type: number
+        temperatureC:
+          type: number
+        healthy:
+          type: boolean
+        state:
+          type: string
+          enum:
+          - FREE
+          - RESERVED
+          - ALLOCATED
+          - OCCUPIED_LEGACY
+          - OCCUPIED_UNKNOWN
+          - UNHEALTHY
+        assignedJobId: &id001
+          type: string
+        stateReason: *id001
+        observedConsumers:
+          type: array
+          items: *id001
+    Container:
+      type: object
+      required:
+      - id
+      - name
+      - image
+      - state
+      - origin
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        image:
+          type: string
+        state:
+          type: string
+        origin:
+          type: string
+          enum:
+          - MANAGED
+          - LEGACY
+          - UNKNOWN
+        jobId:
+          type: string
+        gpuUuids:
+          type: array
+          items:
+            type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt: &id003
+          type: string
+          format: date-time
+        exitCode: *id002
+    GPUProcess:
+      type: object
+      required:
+      - pid
+      - gpuUuid
+      - usedMemoryMiB
+      properties:
+        pid:
+          type: integer
+        gpuUuid:
+          type: string
+        usedMemoryMiB:
+          type: integer
+          format: int64
+        containerId:
+          type: string
+        processName:
+          type: string
+    AgentCommand:
+      type: object
+      required:
+      - id
+      - type
+      - payload
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum:
+          - START_CONTAINER
+          - STOP_CONTAINER
+        payload:
+          oneOf:
+          - $ref: '#/components/schemas/StartContainerPayload'
+          - $ref: '#/components/schemas/StopContainerPayload'
+    StartContainerPayload:
+      type: object
+      required:
+      - jobId
+      - name
+      - image
+      - gpuUuids
+      properties:
+        jobId:
+          type: string
+        name:
+          type: string
+        image:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+        environment:
+          type: object
+          additionalProperties:
+            type: string
+        gpuUuids:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        cpuMilli:
+          type: integer
+          format: int64
+          minimum: 0
+        memoryMiB:
+          type: integer
+          format: int64
+          minimum: 0
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+    StopContainerPayload:
+      type: object
+      required:
+      - jobId
+      - graceSeconds
+      properties:
+        jobId:
+          type: string
+        containerId:
+          type: string
+        graceSeconds:
+          type: integer
+          minimum: 0
+    CreateJobRequest:
+      type: object
+      required:
+      - name
+      - image
+      - resources
+      properties:
+        name: &id004
+          type: string
+          minLength: 3
+          maxLength: 128
+        image: &id005
+          type: string
+          maxLength: 512
+        backend: &id006
+          type: string
+          enum:
+          - DOCKER
+          default: DOCKER
+        command: &id007
+          type: array
+          items:
+            type: string
+        environment:
+          type: object
+          additionalProperties:
+            type: string
+        resources: &id008
+          $ref: '#/components/schemas/ResourceRequest'
+        priority: &id009
+          type: integer
+          minimum: 0
+          default: 0
+          maximum: 1000
+        serverSelector: &id010
+          type: object
+          additionalProperties:
+            type: string
+        strategy: &id011
+          $ref: '#/components/schemas/Strategy'
+      additionalProperties: false
+    CommandAck:
+      type: object
+      required:
+      - succeeded
+      properties:
+        succeeded:
+          type: boolean
+        message:
+          type: string
+        containerId:
+          type: string
+    Strategy:
+      type: string
+      enum:
+      - first-fit
+      - best-fit
+      - bin-pack
+      - fragmentation-aware
+    JobStatus:
+      type: string
+      enum:
+      - QUEUED
+      - ASSIGNED
+      - STARTING
+      - RUNNING
+      - STOPPING
+      - STOPPED
+      - CANCELLED
+      - SUCCEEDED
+      - FAILED
+    HostInfo:
+      type: object
+      properties:
+        hostname: *id001
+        os: *id001
+        architecture: *id001
+        cpuCount: *id002
+        memoryTotalMiB: *id002
+      required: &id012 []
+    ResourceRequest:
+      type: object
+      required:
+      - gpuCount
+      properties:
+        gpuCount:
+          type: integer
+          minimum: 1
+          maximum: 64
+        gpuModel:
+          type: string
+        minVramMiB:
+          type: integer
+          minimum: 0
+        cpuMilli:
+          type: integer
+          minimum: 0
+        memoryMiB:
+          type: integer
+          minimum: 0
+        allowSharedGpu:
+          type: boolean
+          default: false
+          const: false
+      additionalProperties: false
+    JobEvent:
+      type: object
+      properties:
+        jobId: *id001
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        reason: *id001
+        at: *id003
+      required:
+      - jobId
+      - status
+      - reason
+      - at
+    Assignment:
+      type: object
+      properties:
+        serverId: *id001
+        gpuUuids:
+          type: array
+          items: *id001
+        commandId: *id001
+        assignedAt: *id003
+        reservationState:
+          type: string
+          enum:
+          - RESERVED
+          - ALLOCATED
+          - RELEASED
+        releasedAt: *id003
+        strategy:
+          $ref: '#/components/schemas/Strategy'
+        score:
+          type: number
+        reason: *id001
+      required:
+      - serverId
+      - gpuUuids
+      - commandId
+      - assignedAt
+      - reservationState
+      - strategy
+      - score
+      - reason
+    Job:
+      type: object
+      properties:
+        name: *id004
+        image: *id005
+        backend: *id006
+        command: *id007
+        environment:
+          type: object
+          additionalProperties:
+            type: string
+            const: '[redacted]'
+          description: Values are never returned by public job APIs.
+        resources: *id008
+        priority: *id009
+        serverSelector: *id010
+        strategy: *id011
+        id: *id001
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        statusReason: *id001
+        assignment:
+          $ref: '#/components/schemas/Assignment'
+        createdAt: *id003
+        updatedAt: *id003
+        lastObservedAt: *id003
+        containerId: *id001
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobEvent'
+      required:
+      - id
+      - name
+      - image
+      - backend
+      - resources
+      - priority
+      - strategy
+      - status
+      - createdAt
+      - updatedAt
+      - events
+    Server:
+      type: object
+      properties:
+        id: *id001
+        machineId: *id001
+        name: *id001
+        address: *id001
+        agentVersion: *id001
+        labels:
+          type: object
+          additionalProperties: *id001
+        status:
+          type: string
+          enum:
+          - ONLINE
+          - OFFLINE
+          - DRAINING
+        drained:
+          type: boolean
+        schedulable:
+          type: boolean
+        schedulingReason: *id001
+        host:
+          $ref: '#/components/schemas/HostInfo'
+        lastHeartbeatAt: *id003
+        lastInventoryAt: *id003
+        inventoryReceivedAt: *id003
+        inventoryVersion: *id002
+        dockerVersion: *id001
+        gpus:
+          type: array
+          items:
+            $ref: '#/components/schemas/GPU'
+        containers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Container'
+      required:
+      - id
+      - machineId
+      - name
+      - status
+      - drained
+      - schedulable
+      - schedulingReason
+      - host
+      - lastHeartbeatAt
+      - inventoryVersion
+      - gpus
+      - containers
+    ClusterSummary:
+      type: object
+      properties:
+        serversTotal: *id002
+        serversOnline: *id002
+        gpusTotal: *id002
+        gpusFree: *id002
+        gpusOccupied: *id002
+        gpusOccupiedLegacy: *id002
+        gpusOccupiedUnknown: *id002
+        jobsQueued: *id002
+        jobsRunning: *id002
+        recentEvents:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobEvent'
+      required: *id012
+    GPUInventoryItem:
+      type: object
+      properties:
+        serverId: *id001
+        serverName: *id001
+        serverStatus:
+          type: string
+          enum:
+          - ONLINE
+          - OFFLINE
+          - DRAINING
+        gpu:
+          $ref: '#/components/schemas/GPU'
+      required: *id012
+    ContainerInventoryItem:
+      type: object
+      properties:
+        serverId: *id001
+        serverName: *id001
+        container:
+          $ref: '#/components/schemas/Container'
+      required: *id012
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: *id001
+            message: *id001
+          required:
+          - code
+          - message
+      required:
+      - error
+    RegisterAgentResponse:
+      type: object
+      properties:
+        agentId: *id001
+        agentToken: *id001
+        heartbeatIntervalSeconds: *id002
+      required:
+      - agentId
+      - agentToken
+      - heartbeatIntervalSeconds
+security:
+- publicBearer: []

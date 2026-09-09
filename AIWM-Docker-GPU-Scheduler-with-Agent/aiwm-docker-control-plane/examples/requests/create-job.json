@@ -1,0 +1,25 @@
+{
+  "name": "gpu-demo",
+  "image": "alpine:3.21",
+  "backend": "DOCKER",
+  "command": [
+    "sh",
+    "-c",
+    "sleep 300"
+  ],
+  "environment": {
+    "DEMO": "true"
+  },
+  "resources": {
+    "gpuCount": 1,
+    "minVramMiB": 0,
+    "cpuMilli": 1000,
+    "memoryMiB": 256,
+    "allowSharedGpu": false
+  },
+  "priority": 50,
+  "serverSelector": {
+    "site": "hanoi"
+  },
+  "strategy": "fragmentation-aware"
+}

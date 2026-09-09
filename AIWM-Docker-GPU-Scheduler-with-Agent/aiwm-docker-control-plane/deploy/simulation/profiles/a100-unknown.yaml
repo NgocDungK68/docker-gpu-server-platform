@@ -1,0 +1,36 @@
+# NVIDIA nvml-mock YAML schema; consumed by libnvidia-ml.so, not by AIWM.
+version: "1.0"
+system:
+  driver_version: "550.163.01"
+  nvml_version: "12.550.163.01"
+  cuda_version: "12.4"
+device_defaults:
+  name: "NVIDIA A100-SXM4-40GB"
+  brand: "nvidia"
+  architecture: "ampere"
+  memory:
+    total_bytes: 42949672960
+    free_bytes: 42949672960
+    used_bytes: 0
+  utilization:
+    gpu: 0
+    memory: 0
+  thermal:
+    temperature_gpu_c: 35
+  mig:
+    mode_current: "disabled"
+    mode_pending: "disabled"
+devices:
+  - index: 0
+    uuid: "GPU-00000003-0000-0000-0000-000000000000"
+  - index: 1
+    uuid: "GPU-00000003-0000-0000-0000-000000000001"
+    processes:
+      - pid: 424242
+        type: "C"
+        name: "unattributed-host-process"
+        used_memory_mib: 1024
+  - index: 2
+    uuid: "GPU-00000003-0000-0000-0000-000000000002"
+  - index: 3
+    uuid: "GPU-00000003-0000-0000-0000-000000000003"

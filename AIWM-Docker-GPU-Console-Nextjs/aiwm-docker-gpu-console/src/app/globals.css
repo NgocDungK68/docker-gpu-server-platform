@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5f6f8;
+  --foreground: #111827;
+  --brand-red: #ee0033;
+  --brand-red-dark: #c9002c;
+  --brand-red-soft: #fff0f3;
+  --font-ui: "Segoe UI", Arial, Helvetica, sans-serif;
+  --radius-card: 0.875rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-ui);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html { min-width: 320px; background: var(--background); }
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-ui);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+}
+
+button, input, select, textarea { font: inherit; }
+button, a { -webkit-tap-highlight-color: transparent; }
+
+::selection { background: #ffd4dd; color: #8c001e; }
+
+.surface-card {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-card);
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.025);
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.btn {
+  display: inline-flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.625rem;
+  padding: 0.5rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  transition: 160ms ease;
+  cursor: pointer;
+}
+.btn:disabled { cursor: not-allowed; opacity: .55; }
+.btn-primary { background: var(--brand-red); color: #fff; }
+.btn-primary:hover:not(:disabled) { background: var(--brand-red-dark); box-shadow: 0 6px 18px rgb(238 0 51 / .18); }
+.btn-secondary { border-color: #cbd5e1; background: #fff; color: #334155; }
+.btn-secondary:hover:not(:disabled) { border-color: #94a3b8; background: #f8fafc; color: #0f172a; }
+.btn-ghost { background: transparent; color: #475569; }
+.btn-ghost:hover:not(:disabled) { background: #f1f5f9; color: #0f172a; }
+.btn-danger { background: #b91c1c; color: #fff; }
+.btn-danger:hover:not(:disabled) { background: #991b1b; }
+
+.badge { display: inline-flex; align-items: center; border: 1px solid; border-radius: 999px; padding: .2rem .55rem; font-size: .7rem; font-weight: 800; line-height: 1rem; letter-spacing: .03em; white-space: nowrap; }
+.badge-success { border-color: #a7f3d0; background: #ecfdf5; color: #047857; }
+.badge-warning { border-color: #fde68a; background: #fffbeb; color: #b45309; }
+.badge-danger { border-color: #fecaca; background: #fef2f2; color: #b91c1c; }
+.badge-info { border-color: #bae6fd; background: #f0f9ff; color: #0369a1; }
+.badge-violet { border-color: #ddd6fe; background: #f5f3ff; color: #6d28d9; }
+.badge-neutral { border-color: #e2e8f0; background: #f8fafc; color: #475569; }
+
+.field-label { display: block; margin-bottom: .45rem; font-size: .8125rem; font-weight: 700; color: #334155; }
+.field-input, .field-select, .field-textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: .625rem;
+  background: #fff;
+  padding: .66rem .75rem;
+  font-size: .875rem;
+  color: #0f172a;
+  outline: none;
+  transition: border-color 150ms, box-shadow 150ms;
+}
+.field-input:focus, .field-select:focus, .field-textarea:focus { border-color: var(--brand-red); box-shadow: 0 0 0 3px rgb(238 0 51 / .1); }
+.field-input::placeholder, .field-textarea::placeholder { color: #94a3b8; }
+.field-error { margin-top: .35rem; font-size: .75rem; color: #c9002c; }
+
+.data-table { width: 100%; border-collapse: collapse; }
+.data-table th { background: #f8fafc; padding: .7rem 1rem; text-align: left; font-size: .72rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: #64748b; }
+.data-table td { border-top: 1px solid #edf2f7; padding: .8rem 1rem; font-size: .875rem; color: #334155; vertical-align: middle; }
+.data-table tbody tr { transition: background 120ms; }
+.data-table tbody tr:hover { background: #fafafa; }
+
+@media (max-width: 700px) {
+  .page-header { flex-direction: column; }
+  .page-header > div:last-child { width: 100%; }
+  .data-table th, .data-table td { padding-left: .75rem; padding-right: .75rem; }
+}

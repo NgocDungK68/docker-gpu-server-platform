@@ -1,0 +1,27 @@
+# Optional hosts; use together with compose.yaml, with unique physical UUID profiles.
+services:
+  agent-unknown:
+    extends:
+      file: compose.yaml
+      service: agent-t4
+    environment:
+      AIWM_AGENT_MACHINE_ID: sim-unknown
+      AIWM_AGENT_NAME: fake-server-unknown
+      AIWM_AGENT_LABELS: site=unknown,pool=simulation
+      MOCK_NVML_CONFIG: /profiles/a100-unknown.yaml
+    volumes:
+      - agent-unknown-data:/state
+  agent-unhealthy:
+    extends:
+      file: compose.yaml
+      service: agent-t4
+    environment:
+      AIWM_AGENT_MACHINE_ID: sim-unhealthy
+      AIWM_AGENT_NAME: fake-server-unhealthy
+      AIWM_AGENT_LABELS: site=unhealthy,pool=simulation
+      MOCK_NVML_CONFIG: /profiles/a100-unhealthy.yaml
+    volumes:
+      - agent-unhealthy-data:/state
+volumes:
+  agent-unknown-data:
+  agent-unhealthy-data:

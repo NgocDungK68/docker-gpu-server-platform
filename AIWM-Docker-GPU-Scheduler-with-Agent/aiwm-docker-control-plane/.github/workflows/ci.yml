@@ -1,0 +1,30 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Format check
+        run: test -z "$(gofmt -l .)"
+      - name: Test
+        run: go test -race -cover ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build binaries
+        run: |
+          go build ./cmd/aiwm-server
+          go build ./cmd/aiwm-agent
+          go build ./cmd/aiwm-agent-sim
+          go build ./cmd/aiwm-scheduler-bench

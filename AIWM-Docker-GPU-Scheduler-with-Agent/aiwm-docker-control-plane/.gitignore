@@ -1,0 +1,17 @@
+# Binaries and test artifacts
+/bin/
+/dist/
+*.exe
+*.test
+coverage.out
+
+# Local configuration and data
+.env
+.env.agent
+*.db
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

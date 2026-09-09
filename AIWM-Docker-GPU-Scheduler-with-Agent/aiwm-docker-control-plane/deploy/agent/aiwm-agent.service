@@ -1,0 +1,32 @@
+[Unit]
+Description=AIWM Docker GPU Agent
+Documentation=https://github.com/VDT-AI-2026/aiwm-docker-control-plane
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=simple
+User=aiwm-agent
+Group=aiwm-agent
+SupplementaryGroups=docker
+EnvironmentFile=-/etc/aiwm-agent/agent.env
+ExecStart=/usr/local/bin/aiwm-agent
+Restart=always
+RestartSec=5s
+TimeoutStopSec=20s
+StateDirectory=aiwm-agent
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

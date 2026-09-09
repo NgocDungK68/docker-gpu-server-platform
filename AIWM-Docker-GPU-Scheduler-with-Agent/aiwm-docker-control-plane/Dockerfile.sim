@@ -1,0 +1,20 @@
+FROM golang:1.26.6-bookworm AS nvml
+ARG NVML_MOCK_COMMIT=3b7f630a1da54dd3124a12e3babe66c9a3ac4f13
+WORKDIR /upstream
+RUN git init && git remote add origin https://github.com/NVIDIA/k8s-test-infra.git && git fetch --depth 1 origin ${NVML_MOCK_COMMIT} && git checkout --detach FETCH_HEAD
+RUN make -C pkg/gpu/mocknvml NO_PADDING=1
+
+FROM golang:1.26.6-bookworm AS agent-build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=1 go build -trimpath -o /out/aiwm-agent-sim ./cmd/aiwm-agent-sim
+RUN CGO_ENABLED=1 go build -trimpath -o /out/aiwm-agent ./cmd/aiwm-agent
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=nvml /upstream/pkg/gpu/mocknvml/libnvidia-ml.so.550.163.01 /opt/nvml/libnvidia-ml.so.1
+COPY --from=agent-build /out/ /usr/local/bin/
+ENV LD_LIBRARY_PATH=/opt/nvml
+ENTRYPOINT ["aiwm-agent-sim"]

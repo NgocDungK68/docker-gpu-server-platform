@@ -1,0 +1,38 @@
+# VS Code REST Client. Set process AIWM_API_TOKEN to the local operator token.
+@base = http://localhost:8080
+@apiToken = {{$processEnv AIWM_API_TOKEN}}
+
+### Health
+GET {{base}}/healthz
+
+### Inventory
+GET {{base}}/api/v1/servers
+Authorization: Bearer {{apiToken}}
+
+### External containers (read-only)
+GET {{base}}/api/v1/containers?origin=LEGACY
+Authorization: Bearer {{apiToken}}
+
+### Create a managed whole-GPU job
+# @name create
+POST {{base}}/api/v1/jobs
+Authorization: Bearer {{apiToken}}
+Content-Type: application/json
+
+< ../requests/create-job.json
+
+### Job detail
+GET {{base}}/api/v1/jobs/{{create.response.body.data.id}}
+Authorization: Bearer {{apiToken}}
+
+### Stop/cancel only the job created above
+POST {{base}}/api/v1/jobs/{{create.response.body.data.id}}/stop
+Authorization: Bearer {{apiToken}}
+
+### Queue
+GET {{base}}/api/v1/queue
+Authorization: Bearer {{apiToken}}
+
+### Scheduler (optional; it also runs automatically)
+POST {{base}}/api/v1/scheduler/run-once
+Authorization: Bearer {{apiToken}}

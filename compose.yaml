@@ -1,0 +1,62 @@
+name: aiwm-demo
+services:
+  control-plane:
+    build: ./AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane
+    environment:
+      AIWM_HTTP_ADDR: ":8080"
+      AIWM_STATE_FILE: /data/control-plane.gob
+      AIWM_ENROLLMENT_TOKEN: ${AIWM_ENROLLMENT_TOKEN:?Run python scripts/configure.py}
+      AIWM_API_TOKEN: ${AIWM_API_TOKEN:?Run python scripts/configure.py}
+      AIWM_AGENT_OFFLINE_AFTER: 20s
+      AIWM_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - control-plane-data:/data
+  agent-a100:
+    image: aiwm-agent-sim:local
+    build:
+      context: ./AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane
+      dockerfile: Dockerfile.sim
+    depends_on: [control-plane]
+    environment: &agent-env
+      AIWM_CONTROL_PLANE_URL: http://control-plane:8080
+      AIWM_ENROLLMENT_TOKEN: ${AIWM_ENROLLMENT_TOKEN:?Run python scripts/configure.py}
+      AIWM_AGENT_MACHINE_ID: sim-a100
+      AIWM_AGENT_NAME: fake-server-a100
+      AIWM_AGENT_LABELS: site=hanoi,pool=simulation
+      AIWM_AGENT_STATE_FILE: /state/agent.json
+      AIWM_AGENT_INVENTORY_INTERVAL: 2s
+      AIWM_AGENT_HEARTBEAT_INTERVAL: 2s
+      AIWM_AGENT_COMMAND_POLL_INTERVAL: 1s
+      AIWM_SIM_EXTERNAL_GPU_INDEXES: "0"
+      MOCK_NVML_CONFIG: /profiles/a100-external.yaml
+    volumes:
+      - ./AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/deploy/simulation/profiles:/profiles:ro
+      - agent-a100-data:/state
+  agent-t4:
+    image: aiwm-agent-sim:local
+    depends_on: [control-plane, agent-a100]
+    environment:
+      <<: *agent-env
+      AIWM_AGENT_MACHINE_ID: sim-t4
+      AIWM_AGENT_NAME: fake-server-t4
+      AIWM_AGENT_LABELS: site=hcm,pool=simulation
+      AIWM_SIM_EXTERNAL_GPU_INDEXES: ""
+      MOCK_NVML_CONFIG: /profiles/t4-empty.yaml
+    volumes:
+      - ./AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/deploy/simulation/profiles:/profiles:ro
+      - agent-t4-data:/state
+  console:
+    profiles: [console]
+    build: ./AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console
+    depends_on: [control-plane]
+    environment:
+      AIWM_API_BASE_URL: http://control-plane:8080
+      AIWM_API_TOKEN: ${AIWM_API_TOKEN:?Run python scripts/configure.py}
+    ports:
+      - "127.0.0.1:3000:3000"
+volumes:
+  control-plane-data:
+  agent-a100-data:
+  agent-t4-data:
