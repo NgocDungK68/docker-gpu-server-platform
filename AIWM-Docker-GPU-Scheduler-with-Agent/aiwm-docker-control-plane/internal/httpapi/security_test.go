@@ -41,13 +41,13 @@ func TestAuthenticationBoundaries(t *testing.T) {
 }
 func TestPublicValidationAndSecretRedaction(t *testing.T) {
 	handler := testAPI()
-	valid := domain.CreateJobRequest{Name: "valid-job", Image: "alpine:3.21", Resources: domain.ResourceRequest{GPUCount: 1}}
+	valid := validAllocationRequest()
 	for _, tc := range []struct {
 		name   string
 		change func(*domain.CreateJobRequest)
 	}{
 		{"invalid image", func(j *domain.CreateJobRequest) { j.Image = "not a valid image" }},
-		{"strategy", func(j *domain.CreateJobRequest) { j.Strategy = "made-up" }},
+		{"profile", func(j *domain.CreateJobRequest) { j.Resources.PerformanceProfile = "made-up" }},
 		{"negative memory", func(j *domain.CreateJobRequest) { j.Resources.MemoryMiB = -1 }},
 		{"gpu override", func(j *domain.CreateJobRequest) { j.Environment = map[string]string{"NVIDIA_VISIBLE_DEVICES": "all"} }},
 		{"sharing", func(j *domain.CreateJobRequest) { j.Resources.AllowSharedGPU = true }},

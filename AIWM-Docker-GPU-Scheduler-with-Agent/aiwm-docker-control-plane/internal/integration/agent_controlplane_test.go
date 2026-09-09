@@ -57,8 +57,10 @@ func TestBrownfieldEndToEndLegacyWorkloadSurvives(t *testing.T) {
 		servers, _ := controlPlane.ListServers(context.Background())
 		return len(servers) == 1 && len(servers[0].GPUs) == 2 && servers[0].GPUs[0].State == domain.GPUOccupiedLegacy
 	})
+	fp8 := false
 	job, err := controlPlane.CreateJob(context.Background(), domain.CreateJobRequest{
-		Name: "new-job", Image: "busybox", Resources: domain.ResourceRequest{GPUCount: 1, GPUModel: "A100"},
+		AllocationIntent: domain.AllocationIntent{WorkloadType: domain.WorkloadTraining, NecessityLevel: domain.Necessity2, NecessityReason: "GO_LIVE_90_DAYS", SystemImportance: domain.ImportanceImportant, NeededAt: time.Now().UTC().Format(time.RFC3339), TTLSeconds: 3600},
+		Name:             "new-job", Image: "busybox", Resources: domain.AllocationResources{GPUCount: 1, MinVRAMMiB: 1024, PerformanceProfile: "a100-equivalent", FP8Required: &fp8},
 	})
 	if err != nil {
 		t.Fatal(err)

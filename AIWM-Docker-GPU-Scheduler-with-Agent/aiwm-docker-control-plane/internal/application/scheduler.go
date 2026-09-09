@@ -3,7 +3,6 @@ package application
 import (
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/domain"
@@ -40,6 +39,17 @@ func NewScheduler(strategy domain.SchedulingStrategy, offlineAfter time.Duration
 	}}
 }
 
+// WithPolicy returns an independent registry with a replacement or additional scorer.
+func (s Scheduler) WithPolicy(name domain.SchedulingStrategy, policy SchedulingPolicy) Scheduler {
+	registry := make(map[domain.SchedulingStrategy]SchedulingPolicy, len(s.policies)+1)
+	for k, v := range s.policies {
+		registry[k] = v
+	}
+	registry[name] = policy
+	s.policies = registry
+	return s
+}
+
 type candidate struct {
 	server domain.Server
 	gpus   []domain.GPU
@@ -48,10 +58,7 @@ type candidate struct {
 
 // Plan separates filter, score and select; stable UUID/server-ID ties make replay deterministic.
 func (s Scheduler) Plan(job domain.Job, servers []domain.Server, now time.Time) (domain.Placement, error) {
-	strategy := job.Strategy
-	if strategy == "" {
-		strategy = s.defaultStrategy
-	}
+	strategy := s.defaultStrategy
 	policy, ok := s.policies[strategy]
 	if !ok || job.Resources.GPUCount <= 0 {
 		return domain.Placement{}, fmt.Errorf("%w: invalid strategy or GPU count", domain.ErrInvalidInput)
@@ -90,7 +97,7 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 		}
 		labels = true
 		for _, gpu := range server.GPUs {
-			if job.Resources.GPUModel != "" && !strings.EqualFold(gpu.Model, job.Resources.GPUModel) {
+			if !job.Resources.CapabilityMatches(gpu) {
 				continue
 			}
 			model = true
@@ -120,7 +127,7 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 	case !labels:
 		reason = "no server matches the requested labels"
 	case !model:
-		reason = "GPU model unavailable"
+		reason = "GPU model unavailable for performance profile / FP8 requirement"
 	case !healthy:
 		reason = "no healthy matching GPU"
 	case !available && external:
@@ -152,7 +159,7 @@ func selectCandidate(candidates []candidate) candidate {
 func matchingGPUs(gpus []domain.GPU, request domain.ResourceRequest) []domain.GPU {
 	result := make([]domain.GPU, 0)
 	for _, gpu := range gpus {
-		if !gpu.Schedulable() || (request.GPUModel != "" && !strings.EqualFold(gpu.Model, request.GPUModel)) || gpu.AvailableMemoryMiB() < request.MinVRAMMiB {
+		if !request.Matches(gpu) {
 			continue
 		}
 		result = append(result, gpu)

@@ -12,20 +12,25 @@ import (
 )
 
 type Config struct {
-	HTTPAddr          string
-	StateFile         string
-	PublicAPIToken    string
-	TLSCertFile       string
-	TLSKeyFile        string
-	EnrollmentToken   string
-	HeartbeatInterval time.Duration
-	OfflineAfter      time.Duration
-	CommandLease      time.Duration
-	SchedulerInterval time.Duration
-	ReconcileInterval time.Duration
-	SchedulerStrategy domain.SchedulingStrategy
-	CORSOrigins       []string
-	LogLevel          string
+	DevelopmentInSizingPlan bool
+	DevelopmentQuotaGPUs    int
+	DevelopmentUsedGPUs     int
+	MaxGPUCount             int
+	MaxTTLSeconds           int64
+	HTTPAddr                string
+	StateFile               string
+	PublicAPIToken          string
+	TLSCertFile             string
+	TLSKeyFile              string
+	EnrollmentToken         string
+	HeartbeatInterval       time.Duration
+	OfflineAfter            time.Duration
+	CommandLease            time.Duration
+	SchedulerInterval       time.Duration
+	ReconcileInterval       time.Duration
+	SchedulerStrategy       domain.SchedulingStrategy
+	CORSOrigins             []string
+	LogLevel                string
 }
 
 func Load() (Config, error) {
@@ -43,6 +48,29 @@ func Load() (Config, error) {
 		LogLevel:          env("AIWM_LOG_LEVEL", "info"),
 	}
 	var err error
+	if config.DevelopmentInSizingPlan, err = BoolEnv("AIWM_DEV_IN_SIZING_PLAN", false); err != nil {
+		return Config{}, err
+	}
+	for _, item := range []struct {
+		key           string
+		target        *int
+		fallback, min int
+	}{
+		{"AIWM_DEV_QUOTA_GPUS", &config.DevelopmentQuotaGPUs, 4, 0},
+		{"AIWM_DEV_QUOTA_USED_GPUS", &config.DevelopmentUsedGPUs, 0, 0},
+		{"AIWM_MAX_GPU_COUNT", &config.MaxGPUCount, 64, 1},
+	} {
+		value, e := strconv.Atoi(env(item.key, strconv.Itoa(item.fallback)))
+		if e != nil || value < item.min {
+			return Config{}, fmt.Errorf("invalid %s", item.key)
+		}
+		*item.target = value
+	}
+	config.MaxTTLSeconds, err = strconv.ParseInt(env("AIWM_MAX_TTL_SECONDS", "2592000"), 10, 64)
+	if err != nil || config.MaxTTLSeconds < 1 {
+		return Config{}, fmt.Errorf("invalid AIWM_MAX_TTL_SECONDS")
+	}
+
 	if config.HeartbeatInterval, err = envDuration("AIWM_AGENT_HEARTBEAT_INTERVAL", 5*time.Second); err != nil {
 		return Config{}, err
 	}

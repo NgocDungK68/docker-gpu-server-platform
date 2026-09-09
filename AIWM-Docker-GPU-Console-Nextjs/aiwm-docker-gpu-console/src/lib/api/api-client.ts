@@ -1,6 +1,8 @@
 import { appConfig } from "@/config/app";
 import { endpoints } from "@/lib/api/endpoints";
 import type {
+  AllocationOptions,
+  JobPreview,
   APIEnvelope,
   APIErrorBody,
   ClusterSummary,
@@ -19,6 +21,7 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly code = "UNKNOWN",
+    public readonly fields: Record<string, string> = {},
   ) {
     super(message);
     this.name = "ApiError";
@@ -45,6 +48,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       error?.message ?? `Request failed with status ${response.status}`,
       response.status,
       error?.code,
+      error?.fields,
     );
   }
   return (payload as APIEnvelope<T>).data;
@@ -66,6 +70,8 @@ const liveApi = {
   getGPUs: () => request<GPUInventoryItem[]>(endpoints.gpus),
   getContainers: (origin?: ContainerOrigin) =>
     request<ContainerInventoryItem[]>(endpoints.containers(origin)),
+  getAllocationOptions: () => request<AllocationOptions>(endpoints.jobOptions),
+  previewJob: (input: CreateJobInput) => request<JobPreview>(endpoints.jobPreview, { method: "POST", body: JSON.stringify(input) }),
   getJobs: () => request<Job[]>(endpoints.jobs),
   getJob: (id: string) => request<Job>(endpoints.job(id)),
   createJob: (input: CreateJobInput) =>

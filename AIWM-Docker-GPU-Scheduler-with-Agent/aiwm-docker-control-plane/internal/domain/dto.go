@@ -22,15 +22,13 @@ type CommandAckRequest struct {
 }
 
 type CreateJobRequest struct {
-	Name           string             `json:"name"`
-	Image          string             `json:"image"`
-	Backend        ExecutionBackend   `json:"backend,omitempty"`
-	Command        []string           `json:"command,omitempty"`
-	Environment    map[string]string  `json:"environment,omitempty"`
-	Resources      ResourceRequest    `json:"resources"`
-	Priority       int                `json:"priority"`
-	ServerSelector map[string]string  `json:"serverSelector,omitempty"`
-	Strategy       SchedulingStrategy `json:"strategy,omitempty"`
+	AllocationIntent
+	Name        string              `json:"name"`
+	Image       string              `json:"image"`
+	Backend     ExecutionBackend    `json:"backend,omitempty"`
+	Command     []string            `json:"command,omitempty"`
+	Environment map[string]string   `json:"environment,omitempty"`
+	Resources   AllocationResources `json:"resources"`
 }
 
 type DrainServerRequest struct {
@@ -38,8 +36,9 @@ type DrainServerRequest struct {
 }
 
 type APIError struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Fields  map[string]string `json:"fields,omitempty"`
+	Code    string            `json:"code"`
+	Message string            `json:"message"`
 }
 
 type APIResponse struct {

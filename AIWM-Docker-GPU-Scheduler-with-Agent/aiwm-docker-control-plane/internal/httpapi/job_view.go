@@ -1,12 +1,17 @@
 package httpapi
 
 import (
-	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/domain"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/policy"
 	"time"
+
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/domain"
 )
 
 // JobView is a public read model. Secret environment values never leave the server API.
 type JobView struct {
+	NecessityLabel string `json:"necessityLabel"`
+	domain.AllocationIntent
+	Policy         domain.PolicyDecision     `json:"policy"`
 	ID             string                    `json:"id"`
 	Name           string                    `json:"name"`
 	Image          string                    `json:"image"`
@@ -32,7 +37,7 @@ func publicJob(j domain.Job) JobView {
 	for key := range j.Environment {
 		environment[key] = "[redacted]"
 	}
-	return JobView{ID: j.ID, Name: j.Name, Image: j.Image, Backend: j.Backend, Command: j.Command, Environment: environment,
+	return JobView{NecessityLabel: policy.NecessityLabel(j.NecessityLevel), AllocationIntent: j.AllocationIntent, Policy: j.Policy, ID: j.ID, Name: j.Name, Image: j.Image, Backend: j.Backend, Command: j.Command, Environment: environment,
 		Resources: j.Resources, Priority: j.Priority, ServerSelector: j.ServerSelector, Strategy: j.Strategy, Status: j.Status,
 		StatusReason: j.StatusReason, Assignment: j.Assignment, CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
 		LastObservedAt: j.LastObservedAt, ContainerID: j.ContainerID, Events: j.Events}

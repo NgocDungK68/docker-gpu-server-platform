@@ -6,7 +6,7 @@ Backend Go cho logical pool các Docker GPU server độc lập. **[README works
 
 | Binary | Chức năng |
 |---|---|
-| cmd/aiwm-server | Public/Agent HTTP API, inventory, jobs, priority FIFO, scheduling, atomic reservation và reconciliation |
+| cmd/aiwm-server | Public/Agent HTTP API, inventory, jobs, policy admission/queue, scheduling, atomic reservation và reconciliation |
 | cmd/aiwm-agent | Production Agent Linux: Docker Engine local SDK + NVIDIA NVML |
 | cmd/aiwm-agent-sim | Cùng Agent core/NVML adapter; NVIDIA mock shared library và simulated DockerRuntime |
 | cmd/aiwm-scheduler-bench | So sánh 4 policy bằng scheduler production trên fixture deterministic |
@@ -50,7 +50,7 @@ Snapshot durable version1 thay memory-only runtime trước đó. Restart giữ 
 
 ## Scheduler và lifecycle
 
-Bốn strategy: first-fit, best-fit, bin-pack, fragmentation-aware. Filter luôn loại stale/offline/drained server, GPU unhealthy/unknown/external/reserved và kiểm tra model/VRAM/count/labels. Repository revalidate toàn bộ UUID rồi commit job + reservation + command cùng một transaction.
+Bốn strategy: first-fit, best-fit, bin-pack, fragmentation-aware. Filter luôn loại stale/offline/drained server, GPU unhealthy/unknown/external/reserved và kiểm tra performanceProfile/FP8/VRAM/count (legacy model/labels chỉ cho Job cũ). Repository revalidate toàn bộ UUID rồi commit job + reservation + command cùng một transaction.
 
 Luồng start thường là QUEUED → ASSIGNED → STARTING → RUNNING; inventory có thể bỏ qua STARTING hoặc xác nhận exit sớm. Terminal states là STOPPED/SUCCEEDED/FAILED/CANCELLED. Hủy queued hoặc Start còn PENDING đưa Job về CANCELLED. Stop ACK thành công chưa release; inventory xử lý exit/absence theo Job.Status. Nhánh STOPPING + absence chưa đợi Start ACK, và failed Stop ACK đưa Job về RUNNING; xem đầy đủ guards/test gaps trong [Domain Model](../../docs/DOMAIN_MODEL.md). Reservation là Job.Assignment; RELEASED chưa chắc GPU FREE. AgentID = Server.ID, Workload trên UI là Job, không có entity/status riêng cho hai tên này. [Scheduler](../../docs/SCHEDULER.md) có công thức, queue semantics và benchmark output.
 
@@ -81,3 +81,5 @@ Production GPU/CUDA chưa được xác minh trong môi trường demo. Agent pr
 - [API/Screen mapping](docs/frontend-api-map.md), [OpenAPI](api/openapi.yaml), [Agent protocol](docs/agent-protocol.md).
 - [Config](../../docs/CONFIGURATION.md), [Security mapping](../../docs/SECURITY.md).
 - [Scope traceability](../../docs/TRACEABILITY.md), [test scenarios](docs/test-scenarios.md).
+
+Create Job dùng intent TRAINING/INFERENCE và resource constraints; không nhận strategy/priority/serverSelector/gpuModel. GET /api/v1/jobs/options cung cấp catalog/limits, POST /api/v1/jobs/preview đối chiếu không reserve, POST /api/v1/jobs re-evaluate rồi trả QUEUED. Xem [Policy và Scheduler](../../docs/SCHEDULER.md), [Postman runbook](../../docs/API_TESTING_POSTMAN.md). Quota/planning là demo config, TTL chưa tự stop.

@@ -43,6 +43,8 @@ func New(controlPlane *application.ControlPlane, logger *slog.Logger, corsOrigin
 	mux.HandleFunc("GET /api/v1/containers", server.listContainers)
 
 	mux.HandleFunc("POST /api/v1/jobs", server.createJob)
+	mux.HandleFunc("POST /api/v1/jobs/preview", server.previewJob)
+	mux.HandleFunc("GET /api/v1/jobs/options", server.jobOptions)
 	mux.HandleFunc("GET /api/v1/jobs", server.listJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{jobID}", server.getJob)
 	mux.HandleFunc("POST /api/v1/jobs/{jobID}/stop", server.stopJob)
@@ -154,6 +156,18 @@ func (s *Server) listContainers(writer http.ResponseWriter, request *http.Reques
 	respond(writer, result, err, http.StatusOK)
 }
 
+func (s *Server) jobOptions(w http.ResponseWriter, r *http.Request) {
+	respond(w, s.controlPlane.AllocationOptions(), nil, http.StatusOK)
+}
+func (s *Server) previewJob(w http.ResponseWriter, r *http.Request) {
+	var input domain.CreateJobRequest
+	if err := decodeJSON(r, &input); err != nil {
+		respond(w, nil, err, 0)
+		return
+	}
+	result, err := s.controlPlane.PreviewJob(r.Context(), input)
+	respond(w, result, err, http.StatusOK)
+}
 func (s *Server) createJob(writer http.ResponseWriter, request *http.Request) {
 	var input domain.CreateJobRequest
 	if err := decodeJSON(request, &input); err != nil {
@@ -205,7 +219,16 @@ func decodeJSON(request *http.Request, target any) error {
 	decoder := json.NewDecoder(request.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		return errors.Join(domain.ErrInvalidInput, err)
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			return err
+		}
+		var typeError *json.UnmarshalTypeError
+		field := "body"
+		if errors.As(err, &typeError) && typeError.Field != "" {
+			field = typeError.Field
+		}
+		return &domain.ValidationError{Fields: map[string]string{field: "Sai kiểu dữ liệu, thiếu giá trị hoặc có field không được hỗ trợ"}}
 	}
 	if decoder.Decode(&struct{}{}) != io.EOF {
 		return errors.Join(domain.ErrInvalidInput, errors.New("request body must contain one JSON value"))
@@ -239,6 +262,11 @@ func respond(writer http.ResponseWriter, data any, err error, successStatus int)
 	if status == http.StatusInternalServerError {
 		slog.Error("API operation failed", "error", err)
 		message = "internal server error"
+	}
+	var validation *domain.ValidationError
+	if errors.As(err, &validation) {
+		writeJSON(writer, status, domain.APIResponse{Error: &domain.APIError{Code: code, Message: message, Fields: validation.Fields}})
+		return
 	}
 	writeError(writer, status, code, message)
 }

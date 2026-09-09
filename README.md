@@ -63,8 +63,8 @@ Dừng demo: docker compose --profile console down. Các volume state vẫn đư
 1. **Dashboard:** kiểm tra 2 server online, 6 GPU tổng, 5 GPU sẵn sàng, 1 GPU External; các con số thay đổi theo jobs đang chạy.
 2. **Máy chủ:** mở fake-server-a100, xem hardware, Docker version, heartbeat, thời điểm nhận inventory, labels, GPU và container existing-inference-external-0.
 3. **GPU inventory / Containers:** GPU 0 A100 là OCCUPIED_LEGACY, container có badge External và không có nút stop.
-4. **Tạo workload:** giữ alpine:3.21, command ba dòng sh / -c / sleep 300; chọn 3 GPU, selector site=hanoi, strategy fragmentation-aware. Luồng thường là QUEUED → ASSIGNED → STARTING → RUNNING; có thể bỏ qua STARTING nếu inventory đến trước ACK. Xem UUID, score, explanation và reservation trong Job detail.
-5. **Queue:** tạo thêm job 1 GPU với site=hanoi. Khi job 3 GPU vẫn chạy, job mới QUEUED cùng pending reason.
+4. **Tạo workload:** giữ alpine:3.21, command ba dòng sh / -c / sleep 300; chọn TRAINING, 3 GPU, 1024 MiB/GPU, profile A100-equivalent, không yêu cầu FP8; chọn Cần thiết 2, lý do go-live dưới 90 ngày, mức Quan trọng, thời điểm cần và thời lượng 1 giờ. Bấm Đối chiếu tự động rồi Gửi vào hàng đợi. Luồng thường là QUEUED → ASSIGNED → STARTING → RUNNING; có thể bỏ qua STARTING nếu inventory đến trước ACK. Xem UUID, score, explanation và reservation trong Job detail.
+5. **Queue:** tạo thêm job 1 GPU với profile A100-equivalent. Khi job 3 GPU vẫn chạy, job mới QUEUED cùng pending reason.
 6. **Giải phóng:** dừng job 3 GPU, chờ STOPPED và reservation RELEASED. Job 1 GPU tự chạy. Hủy job QUEUED bằng nút Huỷ job.
 7. **Drain:** drain server trong Server detail; scheduling dừng nhận placement mới, container đang chạy giữ nguyên. Bỏ drain để dùng tiếp khi heartbeat/inventory còn mới.
 8. **Agent lost/reconnect:** chạy scripts/recovery.py. Server offline sau timeout, job mới chờ; Agent trở lại thì inventory/reconciliation phục hồi, không duplicate container.
@@ -109,31 +109,47 @@ Trong bảng, backend/frontend là tên viết gọn cho hai project ở trên, 
 - **Server/Agent:** Agent là process, dùng AgentID = Server.ID; chưa có entity hay status Agent riêng. Server giữ machine ID ổn định, token hash, connectivity và drain. Scheduling yêu cầu liveness và inventory mới; inventory được chấp nhận cũng cập nhật LastHeartbeatAt.
 - **GPU:** UUID vật lý, model, VRAM, utilization, health, state, consumer và assignedJobId. FREE chỉ là điều kiện cần; server cũng phải schedulable.
 - **Container:** actual state + origin MANAGED/LEGACY/UNKNOWN, GPU UUIDs, job ID, start/finish/exit code. UI gọi LEGACY là External.
-- **Job / Workload trên UI:** image, command/env, resource request, priority/selector/strategy, status và events. Job.Status kết hợp tiến độ điều khiển với kết quả quan sát; chưa có DesiredState/ActualState riêng hoặc entity Workload thứ hai.
+- **Job / Workload trên UI:** image, command/env, resource constraints, workloadType, Necessity, systemImportance, policy assessment, status và events. Job.Status kết hợp tiến độ điều khiển với kết quả quan sát; chưa có DesiredState/ActualState riêng hoặc entity Workload thứ hai.
 - **Reservation:** nằm trong Job.Assignment, chuyển RESERVED → ALLOCATED → RELEASED hoặc RESERVED → RELEASED; giữ server/UUID/start-command/score/reason. RELEASED là kết thúc logical reservation, GPU chỉ FREE nếu accounting không còn điều kiện chặn.
 
 Agent đăng ký bằng enrollment token, nhận credential riêng và lưu identity/sequence/command results. Mỗi heartbeat dùng thời gian nhận ở Control Plane. Inventory đầy đủ ghép Docker grants, NVML processes và PID/cgroup; phần không xác định được bị bảo vệ. Docker event kích hoạt inventory sớm bên cạnh polling.
 
 Submit tạo job QUEUED. Scheduler lọc → chấm điểm → chọn; repository kiểm tra lại dưới lock và commit reservation + job + command cùng giao dịch. Agent recheck occupancy, thực hiện typed start/stop, ghi kết quả trước ACK. ACK start thành công chưa chứng minh RUNNING; inventory active mới xác nhận đường start. Reconciliation xử lý exit/missing theo Job.Status và ACK failure theo loại command; các guards và giới hạn thứ tự start/stop được ghi trong Domain Model.
 
-Jobs cùng priority theo FIFO, tie cuối bằng ID. Job thiếu tài nguyên vẫn chờ với lý do. Offline giữ last-known inventory và reservation; không tự reschedule workload đang chạy sang host khác.
+Queue theo policy lane → Necessity → auxiliary priority → CreatedAt/ID; user không chọn priority/strategy/server. Job thiếu tài nguyên vẫn chờ với lý do. Offline giữ last-known inventory và reservation; không tự reschedule workload đang chạy sang host khác.
 
 Xem [Domain Model: entities, relationships, states và invariants](docs/DOMAIN_MODEL.md), [kiến trúc chi tiết](docs/ARCHITECTURE.md), [scheduler](docs/SCHEDULER.md) và [scope → source → test](docs/TRACEABILITY.md).
 
+## Policy-driven GPU Allocation
+
+User chọn nhu cầu, Policy Engine xếp thứ tự phục vụ, Scheduler chọn GPU/server. Create API bỏ `priority`, `strategy`, `serverSelector`, `resources.gpuModel`; client cũ gửi chúng nhận 400. Xem [input/policy và extension boundaries](docs/SCHEDULER.md).
+
+Form lấy choices từ backend và có **ĐỐI CHIẾU TỰ ĐỘNG**: quy hoạch, quota, tính cần thiết, GPU phù hợp, lý do chờ. Preview chưa giữ GPU; Submit evaluate lại vào queue chung. Strategy do `AIWM_SCHEDULER_STRATEGY` quản lý.
+
+Quy hoạch/quota hiện là cấu hình demo deterministic, chưa tự accounting; `neededAt` chưa hẹn start, `ttlSeconds` chưa tự stop/reclaim. [CONFIGURATION](docs/CONFIGURATION.md) hướng dẫn đổi demo facts. Windows test được policy/API bằng CP native không cần GPU; thêm Agent Sim Linux/Docker Desktop để có inventory/lifecycle. WSL là tùy chọn.
+
+Nếu chạy image cũ, rebuild **control-plane** và restart frontend sau thay đổi này. Agent protocol không đổi. [IMPLEMENTATION_STATUS](docs/IMPLEMENTATION_STATUS.md) phân biệt focused checks mới với Docker/E2E kiểm chứng trước đó.
+
+## API Testing with Postman
+
+Xem [API audit, authentication và runbook Windows](docs/API_TESTING_POSTMAN.md). Import [Postman collection](postman/AIWM.postman_collection.json) và [local environment](postman/AIWM.local.postman_environment.json), điền AIWM_API_TOKEN vào access_token rồi kiểm tra Health trước. Environment mẫu không chứa secret; Agent/Internal dùng CP test riêng theo runbook.
+
 ## API frontend sử dụng
 
-Browser gọi cùng origin /api/aiwm/*; Next.js chuyển sang /api/v1/* và thêm API token ở server. Các response thành công có data; lỗi có error.code và error.message.
+Browser gọi cùng origin /api/aiwm/*; Next.js chuyển sang /api/v1/* và thêm API token ở server. Các response thành công có data; lỗi có error.code, error.message và error.fields khi validation thất bại.
 
 | Method | Endpoint tại Control Plane | Caller | Purpose | Request | Response data |
 |---|---|---|---|---|---|
-| GET | /healthz, /readyz | Health probe/BFF | Liveness/readiness process | — | status |
+| GET | /healthz, /readyz | Health probe; BFF chỉ gọi /healthz | Liveness/readiness process | — | status |
 | GET | /api/v1/system/summary | Dashboard | Tổng pool + recent events | — | ClusterSummary |
 | GET | /api/v1/servers | Servers, Dashboard, Onboarding | Server inventory | — | Server[] |
 | GET | /api/v1/servers/{id} | Server detail | Host/GPU/containers + freshness | — | Server |
 | POST | /api/v1/servers/{id}/drain | Server detail | Chặn/mở placement mới | drained boolean | Server |
 | GET | /api/v1/gpus | GPU inventory, Dashboard | GPU toàn pool | — | GPUInventoryItem[] |
 | GET | /api/v1/containers | Containers | External/Managed inventory | origin query tùy chọn | ContainerInventoryItem[] |
-| POST | /api/v1/jobs | Submit Job | Tạo job | CreateJobRequest | Job, HTTP 201 |
+| GET | /api/v1/jobs/options | Create form | Catalog labels/reasons/profiles/limits | — | AllocationOptions |
+| POST | /api/v1/jobs/preview | Create form | Đối chiếu, không reserve | CreateJobRequest | JobPreview |
+| POST | /api/v1/jobs | Submit Job | Re-evaluate, tạo QUEUED | CreateJobRequest | Job, HTTP 201 |
 | GET | /api/v1/jobs | Jobs, Scheduler, Dashboard | Jobs và quyết định scheduling | — | Job[] |
 | GET | /api/v1/jobs/{id} | Job detail | Lifecycle/reservation/reason | — | Job |
 | POST | /api/v1/jobs/{id}/stop | Job detail | Hủy queued hoặc stop managed | — | Job, HTTP 202 |

@@ -9,6 +9,8 @@ Simulator chỉ thay DockerRuntime boundary. Cả production/simulator dùng Inv
 ## Boundaries
 
 - domain: server/GPU/container/job/command state; không gọi Docker, HTTP hoặc filesystem.
+- policy: business admission/queue qua Evaluator và FactsProvider; không quyết định GPU placement.
+- capability: profile/FP8 catalog tập trung; resolve constraint dùng chung scheduler/commit.
 - application: register, schedule, queue, summary, wire/domain mapping; Job.Status tổng hợp tiến độ điều khiển và observation, chưa có DesiredState/ActualState riêng. SchedulingPolicy có filter/score/select riêng.
 - ports.Repository: commit reservation và stop/ACK/reconcile atomic.
 - store/memory: critical section bảo vệ toàn bộ các UUID, jobs, command. Kiểm tra đủ điều kiện trước mutation.
@@ -52,3 +54,13 @@ migrations/001_init.sql và 002_lifecycle_target.sql chỉ mô tả future Postg
 ## Observability
 
 JSON slog có request ID, job/server/command ID và scheduler decision. Không ghi env payload hoặc token vào log. /healthz và /readyz là process probes; readiness không cam kết có Agent online hay GPU đủ tài nguyên. Dashboard summary và JobEvent phục vụ demo reconciliation; đây chưa phải immutable audit log.
+
+## Allocation boundaries và source of truth
+
+`AllocationIntent` là dữ liệu user nhập trong Job; `PolicyDecision` là đánh giá theo thời điểm, không phải Job lifecycle state. `AllocationResources` là DTO chặt hơn `ResourceRequest` persistence: user không gửi GPUModel/ResolvedModels/selector. `prepareJob` validate, normalize timestamp và resolve profile; AuxiliaryScore/ResolvedModels không ra JSON.
+
+`POST jobs/preview` chỉ đọc. `POST jobs` re-evaluate, tạo QUEUED. `ScheduleOnce` gọi `Queue → Evaluator.Order` rồi Plan/CommitAssignment. `Placement.Policy` chỉ là metadata application gắn để lưu cùng commit, scorer không đọc/tính policy.
+
+Gob version 1 thêm fields tương thích: Job cũ giữ runtime/Assignment và legacy constraints, intent zero-value; Necessity cũ xếp sau N1–N4 trong cùng lane, importance fallback NORMAL. Catalog snapshot của Job không tự thay khi đổi catalog; fresh health/occupancy/VRAM vẫn recheck mỗi commit.
+
+Planning/Quota production chỉ có interface; implementation hiện tại là deterministic DEVELOPMENT_CONFIG. Không quota ledger/TTL reclaimer/preemption/delayed-start. Frontend chỉ khai báo requirements, đọc backend choices/preview, không tính K/score. Xem [SCHEDULER](SCHEDULER.md).

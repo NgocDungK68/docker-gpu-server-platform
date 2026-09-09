@@ -1,9 +1,8 @@
 openapi: 3.1.0
 info:
   title: AIWM Docker GPU Control Plane API
-  version: 0.3.0
-  description: 'Brownfield-safe control plane for standalone Docker GPU servers. Agent
-    APIs
+  version: 0.4.0
+  description: 'Brownfield-safe control plane for standalone Docker GPU servers. Agent APIs
 
     are machine-to-machine; resource and job APIs are consumed by the web app.
 
@@ -55,8 +54,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -93,8 +91,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -125,8 +122,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -154,8 +150,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -177,8 +172,7 @@ paths:
           maximum: 100
       responses:
         '200':
-          description: Commands leased to this agent; execution is idempotent by command
-            id
+          description: Commands leased to this agent; execution is idempotent by command id
           content:
             application/json:
               schema:
@@ -191,8 +185,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -223,8 +216,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -251,8 +243,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -281,8 +272,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -320,8 +310,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -348,8 +337,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -385,8 +373,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -413,8 +400,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -442,12 +428,15 @@ paths:
                 required:
                 - data
         '400':
-          description: Invalid resource request
+          description: Structured field validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -476,8 +465,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -491,9 +479,8 @@ paths:
       - $ref: '#/components/parameters/JobID'
       responses:
         '202':
-          description: Cancel queued/unleased job or queue managed stop. Repeated
-            requests are idempotent; release waits for actual inventory if a command
-            was delivered.
+          description: Cancel queued/unleased job or queue managed stop. Repeated requests are idempotent; release
+            waits for actual inventory if a command was delivered.
           content:
             application/json:
               schema:
@@ -508,8 +495,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
@@ -536,12 +522,12 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+      description: Policy lane → Necessity → auxiliary priority → CreatedAt → ID; facts/aging được evaluate lại.
   /api/v1/scheduler/run-once:
     post:
       tags:
@@ -558,7 +544,7 @@ paths:
                   data:
                     type: object
                     properties:
-                      assignedJobs: &id002
+                      assignedJobs:
                         type: integer
                     required:
                     - assignedJobs
@@ -567,12 +553,69 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         default:
-          description: Structured error (400 invalid input, 404 absent, 409 conflict,
-            413 body limit, 500 internal)
+          description: Structured error (400 invalid input, 404 absent, 409 conflict, 413 body limit, 500 internal)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/jobs/options:
+    get:
+      tags:
+      - Jobs
+      operationId: jobOptions
+      description: Catalog do backend quản lý.
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AllocationOptions'
+                required:
+                - data
+        '400':
+          description: Structured field validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/v1/jobs/preview:
+    post:
+      tags:
+      - Jobs
+      operationId: previewJob
+      description: Validate và đối chiếu policy/resources; không tạo Job, command hay reservation.
+      responses:
+        '200':
+          description: Thành công
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/JobPreview'
+                required:
+                - data
+        '400':
+          description: Structured field validation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
 components:
   securitySchemes:
     agentBearer:
@@ -711,12 +754,14 @@ components:
           - OCCUPIED_LEGACY
           - OCCUPIED_UNKNOWN
           - UNHEALTHY
-        assignedJobId: &id001
+        assignedJobId:
           type: string
-        stateReason: *id001
+        stateReason:
+          type: string
         observedConsumers:
           type: array
-          items: *id001
+          items:
+            type: string
     Container:
       type: object
       required:
@@ -753,10 +798,11 @@ components:
         startedAt:
           type: string
           format: date-time
-        finishedAt: &id003
+        finishedAt:
           type: string
           format: date-time
-        exitCode: *id002
+        exitCode:
+          type: integer
     GPUProcess:
       type: object
       required:
@@ -851,20 +897,26 @@ components:
       - name
       - image
       - resources
+      - workloadType
+      - necessityLevel
+      - necessityReason
+      - systemImportance
+      - neededAt
+      - ttlSeconds
       properties:
-        name: &id004
+        name:
           type: string
           minLength: 3
           maxLength: 128
-        image: &id005
+        image:
           type: string
           maxLength: 512
-        backend: &id006
+        backend:
           type: string
           enum:
           - DOCKER
           default: DOCKER
-        command: &id007
+        command:
           type: array
           items:
             type: string
@@ -872,20 +924,44 @@ components:
           type: object
           additionalProperties:
             type: string
-        resources: &id008
-          $ref: '#/components/schemas/ResourceRequest'
-        priority: &id009
+        resources:
+          $ref: '#/components/schemas/AllocationResources'
+        workloadType:
+          type: string
+          enum:
+          - TRAINING
+          - INFERENCE
+        necessityLevel:
+          type: string
+          enum:
+          - NECESSITY_1
+          - NECESSITY_2
+          - NECESSITY_3
+          - NECESSITY_4
+        necessityReason:
+          type: string
+          description: ID từ jobs/options theo workloadType + necessityLevel; CUSTOM cần necessityExplanation.
+        necessityExplanation:
+          type: string
+          maxLength: 4096
+        systemImportance:
+          type: string
+          enum:
+          - CRITICAL_SPECIAL
+          - VERY_IMPORTANT
+          - IMPORTANT
+          - NORMAL
+        neededAt:
+          type: string
+          format: date-time
+          description: RFC3339 có timezone, normalize UTC; cho phép quá khứ. Nhu cầu mong muốn, chưa là lịch start.
+        ttlSeconds:
           type: integer
-          minimum: 0
-          default: 0
-          maximum: 1000
-        serverSelector: &id010
-          type: object
-          additionalProperties:
-            type: string
-        strategy: &id011
-          $ref: '#/components/schemas/Strategy'
+          minimum: 1
+          description: Thời lượng đăng ký, đơn vị giây. Maximum từ jobs/options (mặc định 2592000); chưa tự stop/reclaim.
       additionalProperties: false
+      description: Intent-based request; backend đánh giá lại policy và snapshot rồi tạo QUEUED. Scheduler cycle
+        re-evaluate trước atomic reservation.
     CommandAck:
       type: object
       required:
@@ -919,12 +995,17 @@ components:
     HostInfo:
       type: object
       properties:
-        hostname: *id001
-        os: *id001
-        architecture: *id001
-        cpuCount: *id002
-        memoryTotalMiB: *id002
-      required: &id012 []
+        hostname:
+          type: string
+        os:
+          type: string
+        architecture:
+          type: string
+        cpuCount:
+          type: integer
+        memoryTotalMiB:
+          type: integer
+      required: []
     ResourceRequest:
       type: object
       required:
@@ -933,7 +1014,6 @@ components:
         gpuCount:
           type: integer
           minimum: 1
-          maximum: 64
         gpuModel:
           type: string
         minVramMiB:
@@ -949,15 +1029,24 @@ components:
           type: boolean
           default: false
           const: false
+        performanceProfile:
+          type: string
+          description: ID từ backend capability catalog tại jobs/options.
+        fp8Required:
+          type: boolean
       additionalProperties: false
     JobEvent:
       type: object
       properties:
-        jobId: *id001
+        jobId:
+          type: string
         status:
           $ref: '#/components/schemas/JobStatus'
-        reason: *id001
-        at: *id003
+        reason:
+          type: string
+        at:
+          type: string
+          format: date-time
       required:
       - jobId
       - status
@@ -966,24 +1055,32 @@ components:
     Assignment:
       type: object
       properties:
-        serverId: *id001
+        serverId:
+          type: string
         gpuUuids:
           type: array
-          items: *id001
-        commandId: *id001
-        assignedAt: *id003
+          items:
+            type: string
+        commandId:
+          type: string
+        assignedAt:
+          type: string
+          format: date-time
         reservationState:
           type: string
           enum:
           - RESERVED
           - ALLOCATED
           - RELEASED
-        releasedAt: *id003
+        releasedAt:
+          type: string
+          format: date-time
         strategy:
           $ref: '#/components/schemas/Strategy'
         score:
           type: number
-        reason: *id001
+        reason:
+          type: string
       required:
       - serverId
       - gpuUuids
@@ -996,34 +1093,111 @@ components:
     Job:
       type: object
       properties:
-        name: *id004
-        image: *id005
-        backend: *id006
-        command: *id007
+        name:
+          type: string
+          minLength: 3
+          maxLength: 128
+        image:
+          type: string
+          maxLength: 512
+        backend:
+          type: string
+          enum:
+          - DOCKER
+          default: DOCKER
+        command:
+          type: array
+          items:
+            type: string
         environment:
           type: object
           additionalProperties:
             type: string
             const: '[redacted]'
           description: Values are never returned by public job APIs.
-        resources: *id008
-        priority: *id009
-        serverSelector: *id010
-        strategy: *id011
-        id: *id001
+        resources:
+          $ref: '#/components/schemas/ResourceRequest'
+        priority:
+          type: integer
+          minimum: 0
+          default: 0
+          maximum: 1000
+          description: Legacy snapshot field; không dùng để xếp queue mới, không nhận trong CreateJobRequest.
+        serverSelector:
+          type: object
+          additionalProperties:
+            type: string
+        strategy:
+          $ref: '#/components/schemas/Strategy'
+          description: Cấu hình lúc submit; assignment.strategy là thuật toán thực sự lúc placement.
+        id:
+          type: string
         status:
           $ref: '#/components/schemas/JobStatus'
-        statusReason: *id001
+        statusReason:
+          type: string
         assignment:
           $ref: '#/components/schemas/Assignment'
-        createdAt: *id003
-        updatedAt: *id003
-        lastObservedAt: *id003
-        containerId: *id001
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastObservedAt:
+          type: string
+          format: date-time
+        containerId:
+          type: string
         events:
           type: array
           items:
             $ref: '#/components/schemas/JobEvent'
+        workloadType:
+          type: string
+          enum:
+          - TRAINING
+          - INFERENCE
+          - ''
+          description: ' Job cũ trước intent có thể mang zero value.'
+        necessityLevel:
+          type: string
+          enum:
+          - NECESSITY_1
+          - NECESSITY_2
+          - NECESSITY_3
+          - NECESSITY_4
+          - ''
+          description: ' Job cũ trước intent có thể mang zero value.'
+        necessityReason:
+          type: string
+          description: ID từ jobs/options theo workloadType + necessityLevel; CUSTOM cần necessityExplanation. Job
+            cũ trước intent có thể mang zero value.
+        necessityExplanation:
+          type: string
+          maxLength: 4096
+        systemImportance:
+          type: string
+          enum:
+          - CRITICAL_SPECIAL
+          - VERY_IMPORTANT
+          - IMPORTANT
+          - NORMAL
+          - ''
+          description: ' Job cũ trước intent có thể mang zero value.'
+        neededAt:
+          type: string
+          description: RFC3339 có timezone, normalize UTC; cho phép quá khứ. Nhu cầu mong muốn, chưa là lịch start.
+            Job cũ trước intent có thể mang zero value.
+        ttlSeconds:
+          type: integer
+          minimum: 0
+          description: Thời lượng đăng ký, đơn vị giây. Maximum từ jobs/options (mặc định 2592000); chưa tự stop/reclaim.
+            Job cũ trước intent có thể mang zero value.
+        necessityLabel:
+          type: string
+        policy:
+          $ref: '#/components/schemas/PolicyDecision'
       required:
       - id
       - name
@@ -1036,17 +1210,25 @@ components:
       - createdAt
       - updatedAt
       - events
+      - policy
+      - necessityLabel
     Server:
       type: object
       properties:
-        id: *id001
-        machineId: *id001
-        name: *id001
-        address: *id001
-        agentVersion: *id001
+        id:
+          type: string
+        machineId:
+          type: string
+        name:
+          type: string
+        address:
+          type: string
+        agentVersion:
+          type: string
         labels:
           type: object
-          additionalProperties: *id001
+          additionalProperties:
+            type: string
         status:
           type: string
           enum:
@@ -1057,14 +1239,23 @@ components:
           type: boolean
         schedulable:
           type: boolean
-        schedulingReason: *id001
+        schedulingReason:
+          type: string
         host:
           $ref: '#/components/schemas/HostInfo'
-        lastHeartbeatAt: *id003
-        lastInventoryAt: *id003
-        inventoryReceivedAt: *id003
-        inventoryVersion: *id002
-        dockerVersion: *id001
+        lastHeartbeatAt:
+          type: string
+          format: date-time
+        lastInventoryAt:
+          type: string
+          format: date-time
+        inventoryReceivedAt:
+          type: string
+          format: date-time
+        inventoryVersion:
+          type: integer
+        dockerVersion:
+          type: string
         gpus:
           type: array
           items:
@@ -1089,25 +1280,36 @@ components:
     ClusterSummary:
       type: object
       properties:
-        serversTotal: *id002
-        serversOnline: *id002
-        gpusTotal: *id002
-        gpusFree: *id002
-        gpusOccupied: *id002
-        gpusOccupiedLegacy: *id002
-        gpusOccupiedUnknown: *id002
-        jobsQueued: *id002
-        jobsRunning: *id002
+        serversTotal:
+          type: integer
+        serversOnline:
+          type: integer
+        gpusTotal:
+          type: integer
+        gpusFree:
+          type: integer
+        gpusOccupied:
+          type: integer
+        gpusOccupiedLegacy:
+          type: integer
+        gpusOccupiedUnknown:
+          type: integer
+        jobsQueued:
+          type: integer
+        jobsRunning:
+          type: integer
         recentEvents:
           type: array
           items:
             $ref: '#/components/schemas/JobEvent'
-      required: *id012
+      required: []
     GPUInventoryItem:
       type: object
       properties:
-        serverId: *id001
-        serverName: *id001
+        serverId:
+          type: string
+        serverName:
+          type: string
         serverStatus:
           type: string
           enum:
@@ -1116,23 +1318,32 @@ components:
           - DRAINING
         gpu:
           $ref: '#/components/schemas/GPU'
-      required: *id012
+      required: []
     ContainerInventoryItem:
       type: object
       properties:
-        serverId: *id001
-        serverName: *id001
+        serverId:
+          type: string
+        serverName:
+          type: string
         container:
           $ref: '#/components/schemas/Container'
-      required: *id012
+      required: []
     Error:
       type: object
       properties:
         error:
           type: object
           properties:
-            code: *id001
-            message: *id001
+            code:
+              type: string
+            message:
+              type: string
+            fields:
+              type: object
+              additionalProperties:
+                type: string
+              description: Thông báo validation theo JSON field path; lỗi JSON tổng quát dùng body.
           required:
           - code
           - message
@@ -1141,12 +1352,217 @@ components:
     RegisterAgentResponse:
       type: object
       properties:
-        agentId: *id001
-        agentToken: *id001
-        heartbeatIntervalSeconds: *id002
+        agentId:
+          type: string
+        agentToken:
+          type: string
+        heartbeatIntervalSeconds:
+          type: integer
       required:
       - agentId
       - agentToken
       - heartbeatIntervalSeconds
+    AllocationResources:
+      type: object
+      required:
+      - gpuCount
+      - minVramMiB
+      - performanceProfile
+      - fp8Required
+      properties:
+        gpuCount:
+          type: integer
+          minimum: 1
+          description: Maximum lấy từ jobs/options (mặc định 64).
+        minVramMiB:
+          type: integer
+          minimum: 1
+          description: VRAM khả dụng tối thiểu trên từng GPU, MiB.
+        cpuMilli:
+          type: integer
+          minimum: 0
+        memoryMiB:
+          type: integer
+          minimum: 0
+        allowSharedGpu:
+          type: boolean
+          default: false
+          const: false
+        performanceProfile:
+          type: string
+          description: ID từ backend capability catalog tại jobs/options.
+        fp8Required:
+          type: boolean
+      additionalProperties: false
+    PolicyDecision:
+      type: object
+      properties:
+        status:
+          type: string
+          enum:
+          - AUTO_ELIGIBLE
+          - COMPETITIVE
+          - ''
+        reason:
+          type: string
+        inSizingPlan:
+          type: boolean
+        withinQuota:
+          type: boolean
+        quotaUsage:
+          type: integer
+        source:
+          type: string
+        evaluatedAt:
+          type: string
+          format: date-time
+      required:
+      - status
+      - reason
+      - inSizingPlan
+      - withinQuota
+      - quotaUsage
+      - source
+      - evaluatedAt
+      additionalProperties: false
+      description: Snapshot lúc submit/commit; GET queue evaluate lại. Auxiliary score không serialize.
+    ResourceMatch:
+      type: object
+      properties:
+        satisfiable:
+          type: boolean
+        recommendedGpuModels:
+          type: array
+          items:
+            type: string
+        matchedGpuCount:
+          type: integer
+          minimum: 0
+          description: Số GPU phù hợp tối đa trên một server fresh, không cộng nhiều host.
+        recommendationText:
+          type: string
+        unsatisfiedReason:
+          type: string
+      required:
+      - satisfiable
+      - recommendedGpuModels
+      - matchedGpuCount
+      - recommendationText
+      additionalProperties: false
+    JobPreview:
+      type: object
+      properties:
+        workloadType:
+          type: string
+          enum:
+          - TRAINING
+          - INFERENCE
+        policyStatus:
+          type: string
+          enum:
+          - AUTO_ELIGIBLE
+          - COMPETITIVE
+        policyReason:
+          type: string
+        necessityLabel:
+          type: string
+        sizingPlanStatus:
+          type: string
+        quotaStatus:
+          type: string
+        policySource:
+          type: string
+        resourceMatch:
+          $ref: '#/components/schemas/ResourceMatch'
+        evaluatedAt:
+          type: string
+          format: date-time
+      required:
+      - workloadType
+      - policyStatus
+      - policyReason
+      - necessityLabel
+      - sizingPlanStatus
+      - quotaStatus
+      - policySource
+      - resourceMatch
+      - evaluatedAt
+      additionalProperties: false
+    AllocationOption:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+      required:
+      - id
+      - label
+      additionalProperties: false
+    AllocationOptions:
+      type: object
+      properties:
+        limits:
+          type: object
+          properties:
+            maxGpuCount:
+              type: integer
+              minimum: 1
+            maxTtlSeconds:
+              type: integer
+              minimum: 1
+          required:
+          - maxGpuCount
+          - maxTtlSeconds
+        performanceProfiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllocationOption'
+        necessityProfiles:
+          type: array
+          items:
+            type: object
+            properties:
+              workloadType:
+                type: string
+                enum:
+                - TRAINING
+                - INFERENCE
+              level:
+                type: string
+                enum:
+                - NECESSITY_1
+                - NECESSITY_2
+                - NECESSITY_3
+                - NECESSITY_4
+              label:
+                type: string
+              reasons:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AllocationOption'
+            required:
+            - workloadType
+            - level
+            - label
+            - reasons
+        systemImportance:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllocationOption'
+        workloadTypes:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllocationOption'
+        customReason:
+          $ref: '#/components/schemas/AllocationOption'
+      required:
+      - limits
+      - performanceProfiles
+      - necessityProfiles
+      - systemImportance
+      - workloadTypes
+      - customReason
+      additionalProperties: false
 security:
 - publicBearer: []

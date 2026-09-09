@@ -1,5 +1,6 @@
 """Acceptance F/G and Control Plane restart for the isolated root Compose demo."""
 import json
+from datetime import datetime, timezone
 import subprocess
 import time
 from urllib.request import Request, urlopen
@@ -38,7 +39,9 @@ def main():
     created = []
     def submit(name):
         job = api("/jobs", {"name": name + "-" + str(time.time_ns()), "image": "alpine:3.21",
-                           "resources": {"gpuCount": 1}, "serverSelector": {"site": "hanoi"}})
+                           "resources": {"gpuCount": 1, "minVramMiB": 1024, "performanceProfile": "a100-equivalent", "fp8Required": False},
+                           "workloadType": "TRAINING", "necessityLevel": "NECESSITY_2", "necessityReason": "GO_LIVE_90_DAYS",
+                           "systemImportance": "IMPORTANT", "neededAt": datetime.now(timezone.utc).isoformat(), "ttlSeconds": 3600})
         created.append(job["id"])
         return job["id"]
     def job(id):

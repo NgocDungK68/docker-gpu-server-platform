@@ -66,3 +66,28 @@ func TestSchedulerFiltersAndPendingReasons(t *testing.T) {
 		})
 	}
 }
+
+// A system scorer can be replaced without changing API, business priority or safety filters.
+func TestInjectedPlacementPolicyKeepsHardConstraints(t *testing.T) {
+	now := time.Now()
+	servers := []domain.Server{
+		{ID: "a", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-a", domain.GPUFree)}},
+		{ID: "b", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-b", domain.GPUFree)}},
+		{ID: "c", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-c", domain.GPUOccupiedLegacy)}},
+	}
+	scorer := scoreFunc(func(server domain.Server, _, _ []domain.GPU) float64 {
+		if server.ID == "c" {
+			return -100
+		}
+		if server.ID == "b" {
+			return -1
+		}
+		return 0
+	})
+	scheduler := NewScheduler(domain.StrategyBestFit, time.Minute).WithPolicy(domain.StrategyBestFit, scorer)
+	job := domain.Job{Strategy: domain.StrategyFirstFit, Resources: domain.ResourceRequest{GPUCount: 1}}
+	placement, err := scheduler.Plan(job, servers, now)
+	if err != nil || placement.ServerID != "b" || placement.Strategy != domain.StrategyBestFit {
+		t.Fatalf("%+v %v", placement, err)
+	}
+}

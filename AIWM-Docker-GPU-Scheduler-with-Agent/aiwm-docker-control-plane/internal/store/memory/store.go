@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -238,13 +237,10 @@ func (s *Store) ListQueuedJobs(_ context.Context) ([]domain.Job, error) {
 		}
 	}
 	sort.Slice(result, func(i, j int) bool {
-		if result[i].Priority == result[j].Priority {
-			if result[i].CreatedAt.Equal(result[j].CreatedAt) {
-				return result[i].ID < result[j].ID
-			}
+		if !result[i].CreatedAt.Equal(result[j].CreatedAt) {
 			return result[i].CreatedAt.Before(result[j].CreatedAt)
 		}
-		return result[i].Priority > result[j].Priority
+		return result[i].ID < result[j].ID
 	})
 	return result, nil
 }
@@ -300,7 +296,7 @@ func (s *Store) CommitAssignment(_ context.Context, jobID string, placement doma
 		if !wanted[gpu.UUID] {
 			continue
 		}
-		if !gpu.Schedulable() || (job.Resources.GPUModel != "" && !strings.EqualFold(gpu.Model, job.Resources.GPUModel)) || gpu.AvailableMemoryMiB() < job.Resources.MinVRAMMiB {
+		if !job.Resources.Matches(gpu) {
 			return domain.Job{}, domain.ErrConflict
 		}
 		found++
@@ -328,6 +324,7 @@ func (s *Store) CommitAssignment(_ context.Context, jobID string, placement doma
 		CommandID: command.ID, AssignedAt: at,
 		ReservationState: "RESERVED", Strategy: placement.Strategy, Score: placement.Score, Reason: placement.Reason,
 	}
+	job.Policy = placement.Policy
 	job.UpdatedAt = at
 	s.servers[server.ID] = cloneServer(server)
 	s.jobs[job.ID] = cloneJob(job)
@@ -434,6 +431,7 @@ func cloneJob(value domain.Job) domain.Job {
 	value.Command = append([]string(nil), value.Command...)
 	value.Environment = cloneMap(value.Environment)
 	value.ServerSelector = cloneMap(value.ServerSelector)
+	value.Resources.ResolvedModels = append([]string(nil), value.Resources.ResolvedModels...)
 	if value.Assignment != nil {
 		assignment := *value.Assignment
 		assignment.GPUUUIDs = append([]string(nil), value.Assignment.GPUUUIDs...)

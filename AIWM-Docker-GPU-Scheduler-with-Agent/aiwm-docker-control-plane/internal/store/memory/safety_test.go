@@ -98,14 +98,14 @@ func TestReservationRechecksServerAndInventory(t *testing.T) {
 		})
 	}
 }
-func TestQueuePriorityFIFOAndStableTie(t *testing.T) {
+func TestQueueStorageFIFOAndStableTie(t *testing.T) {
 	s, now := fixture(t)
 	queued(t, s, "low", 1, now.Add(-time.Hour))
 	queued(t, s, "later", 9, now.Add(time.Second))
 	queued(t, s, "b", 9, now)
 	queued(t, s, "a", 9, now)
 	jobs, _ := s.ListQueuedJobs(context.Background())
-	for i, want := range []string{"a", "b", "later", "low"} {
+	for i, want := range []string{"low", "a", "b", "later"} {
 		if jobs[i].ID != want {
 			t.Fatalf("index %d=%s", i, jobs[i].ID)
 		}

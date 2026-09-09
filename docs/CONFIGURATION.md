@@ -21,6 +21,11 @@ Từ root chạy python scripts/configure.py để tạo token ngẫu nhiên cho
 | AIWM_SCHEDULER_STRATEGY | best-fit | first-fit, best-fit, bin-pack, fragmentation-aware |
 | AIWM_CORS_ORIGINS | http://localhost:5173,http://localhost:3000 | Browser origin allowlist; BFF dùng same-origin |
 | AIWM_LOG_LEVEL | info | debug/info/warn/error |
+| AIWM_DEV_IN_SIZING_PLAN | false | Facts demo: request trong/ngoài plan |
+| AIWM_DEV_QUOTA_GPUS | 4 | Quota demo theo số GPU |
+| AIWM_DEV_QUOTA_USED_GPUS | 0 | Usage tĩnh; không tự cộng khi Job chạy |
+| AIWM_MAX_GPU_COUNT | 64 | Maximum/request; frontend lấy từ jobs/options |
+| AIWM_MAX_TTL_SECONDS | 2592000 | Maximum TTL giây (30 ngày); chưa tự stop |
 
 Duration dùng cú pháp Go như 500ms, 2s, 1m, phải dương. OfflineAfter phải lớn hơn heartbeat; inventory interval cũng nên nhỏ hơn OfflineAfter để tránh liên tục unschedulable.
 
@@ -72,3 +77,9 @@ Mỗi fake host cần machine ID, Agent state, runtime state và bộ UUID riên
 
 Không còn mock frontend data mode. Đổi server env cần restart Next; đổi NEXT_PUBLIC cần rebuild production bundle.
 
+
+## Demo policy allocation
+
+Native CP đọc env lúc startup; root Compose đã forward chúng. Để demo Auto eligible, đặt `AIWM_DEV_IN_SIZING_PLAN=true`, `AIWM_DEV_QUOTA_GPUS=4`, `AIWM_DEV_QUOTA_USED_GPUS=0` trong root .env rồi `docker compose up -d --force-recreate control-plane`. Request 1 GPU auto eligible; đổi Used=4 rồi recreate để thấy competitive do vượt quota. Đây là dữ liệu demo, không phải quota service production.
+
+Đổi `AIWM_SCHEDULER_STRATEGY` ở CP, không gửi trong Job. Native cần restart, Compose cần recreate khi đổi env; cần build lại CP image nếu source thay đổi. Profile/FP8 mapping tại `internal/capability/catalog.go`; `capability.Resolver` là boundary thay provider.

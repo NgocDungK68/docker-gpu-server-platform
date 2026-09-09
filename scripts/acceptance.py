@@ -1,5 +1,6 @@
 """Acceptance A-E/H against the live Control Plane or the Next.js public proxy."""
 import argparse
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
@@ -32,10 +33,11 @@ def main():
         raise AssertionError(message)
     created = []
     stamp = str(time.time_ns())
-    def submit(name, count=1, site="hanoi"):
+    def submit(name, count=1, profile="a100-equivalent"):
         job = api("/jobs", {"name": "acceptance-" + name + "-" + stamp, "image": "alpine:3.21",
-                           "command": ["sh", "-c", "sleep 300"], "resources": {"gpuCount": count, "allowSharedGpu": False},
-                           "priority": 50, "strategy": "fragmentation-aware", "serverSelector": {"site": site}})
+                           "command": ["sh", "-c", "sleep 300"], "resources": {"gpuCount": count, "minVramMiB": 1024, "performanceProfile": profile, "fp8Required": False},
+                           "workloadType": "TRAINING", "necessityLevel": "NECESSITY_2", "necessityReason": "GO_LIVE_90_DAYS",
+                           "systemImportance": "IMPORTANT", "neededAt": datetime.now(timezone.utc).isoformat(), "ttlSeconds": 3600})
         created.append(job["id"])
         return job["id"]
     def job(id):
@@ -68,7 +70,7 @@ def main():
         assert job(holder)["assignment"]["reservationState"] == "RELEASED"
         print("PASS E: stopped job releases GPU and waiting job runs", flush=True)
         with ThreadPoolExecutor(max_workers=2) as executor:
-            concurrent = list(executor.map(lambda index: submit("concurrent-" + str(index), site="hcm"), range(2)))
+            concurrent = list(executor.map(lambda index: submit("concurrent-" + str(index), profile="general"), range(2)))
         placements = [running(id)["assignment"]["gpuUuids"] for id in concurrent]
         assert set(placements[0]).isdisjoint(placements[1])
         print("PASS H: concurrent jobs have distinct physical GPU UUIDs", flush=True)

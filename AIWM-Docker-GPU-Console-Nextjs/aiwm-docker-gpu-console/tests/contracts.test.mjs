@@ -1,9 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { jobFormSchema, parseKeyValueLines } from "../src/lib/jobs/form-schema.ts";
+import { jobFormSchema, parseKeyValueLines, allocationFormSchema, allocationInput } from "../src/lib/jobs/form-schema.ts";
 import { allowedMutationOrigin, allowedPublicRoute } from "../src/lib/api/proxy-policy.ts";
 
-const valid = { name: "gpu-demo", image: "alpine:3.21", commandLines: "", environmentLines: "", gpuCount: 1, gpuModel: "", priority: 50, strategy: "best-fit", selectorLines: "" };
+const valid = { name: "gpu-demo", image: "alpine:3.21", commandLines: "", environmentLines: "", gpuCount: 1, minVramMiB:1024, performanceProfile:"general", fp8Required:false, workloadType:"TRAINING",necessityLevel:"NECESSITY_2",necessityReason:"GO_LIVE_90_DAYS",necessityExplanation:"",systemImportance:"IMPORTANT",neededAt:"2026-09-09T09:00",ttlHours:1 };
+
 test("same-origin mutation works for inbound localhost and IP hosts, rejects foreign origins", () => {
  assert.equal(allowedMutationOrigin("http://127.0.0.1:3000", "127.0.0.1:3000"), true);
  assert.equal(allowedMutationOrigin("http://localhost:3000", "localhost:3000"), true);
@@ -12,18 +13,39 @@ test("same-origin mutation works for inbound localhost and IP hosts, rejects for
    assert.equal(allowedMutationOrigin(origin, "localhost:3000"), false);
  }
 });
-test("accept all four strategies and preserve empty environment values", () => {
- for (const strategy of ["first-fit", "best-fit", "bin-pack", "fragmentation-aware"]) assert.equal(jobFormSchema.safeParse({ ...valid, strategy }).success, true);
+test("intent input preserves empty environment and omits placement controls", () => {
+ assert.equal(jobFormSchema.safeParse(valid).success, true);
  assert.deepEqual(parseKeyValueLines("EMPTY=\nURL=a=b"), { EMPTY: "", URL: "a=b" });
+ const input=allocationInput({...valid,ttlHours:1.5});
+ assert.equal(input.ttlSeconds,5400);
+ assert.match(input.neededAt,/Z$/);
+ for (const field of ["priority","strategy","serverSelector"]) {
+   assert.equal(field in input,false);
+   assert.equal(jobFormSchema.safeParse({...valid,[field]:"forbidden"}).success,false);
+ }
+ assert.equal("gpuModel" in input.resources,false);
+});
+test("catalog supplies limits and workload-specific reasons", () => {
+ const options={limits:{maxGpuCount:8,maxTtlSeconds:7200},performanceProfiles:[{id:"general",label:"Tổng quát"}],
+ customReason:{id:"CUSTOM",label:"Khác"},necessityProfiles:[{workloadType:"TRAINING",level:"NECESSITY_2",reasons:[{id:"GO_LIVE_90_DAYS",label:"Go-live"}]}]};
+ const schema=allocationFormSchema(options);
+ assert.equal(schema.safeParse(valid).success,true);
+ for (const change of [{gpuCount:9},{ttlHours:3},{performanceProfile:"bad"},{workloadType:"INFERENCE"},{necessityLevel:"NECESSITY_1"},{necessityReason:"CUSTOM"}]) {
+   assert.equal(schema.safeParse({...valid,...change}).success,false);
+ }
+ assert.equal(schema.safeParse({...valid,necessityReason:"CUSTOM",necessityExplanation:"Lý do thực tế"}).success,true);
+ assert.equal(allocationFormSchema({...options,limits:{...options.limits,maxGpuCount:100}}).safeParse({...valid,gpuCount:65}).success,true);
 });
 for (const environmentLines of ["missing-equals", "A=1\nA=2", "NVIDIA_VISIBLE_DEVICES=all", "CUDA_VISIBLE_DEVICES=0", "BAD KEY=x"]) {
  test("reject malformed or unsafe environment: " + environmentLines, () => assert.equal(jobFormSchema.safeParse({ ...valid, environmentLines }).success, false));
 }
 test("validate counts and resource limits", () => {
- for (const fields of [{gpuCount: 0}, {gpuCount: 65}, {priority: -1}, {memoryMiB: -1}, {image: "bad image"}]) assert.equal(jobFormSchema.safeParse({...valid, ...fields}).success, false);
+ for (const fields of [{gpuCount: 0}, {gpuCount: -1}, {gpuCount: 1.5}, {minVramMiB:0}, {minVramMiB:-1}, {workloadType:"OTHER"}, {systemImportance:"OTHER"}, {necessityLevel:"NECESSITY_5"}, {neededAt:"invalid"}, {neededAt:"2026-02-30T10:00"}, {ttlHours:0}, {memoryMiB: -1}, {image: "bad image"}]) assert.equal(jobFormSchema.safeParse({...valid, ...fields}).success, false);
 });
 test("proxy allows public routes but rejects Agent, Docker, traversal and unsupported verbs", () => {
  assert.equal(allowedPublicRoute("GET", ["servers", "srv_123"]), true);
+ assert.equal(allowedPublicRoute("GET", ["jobs", "options"]), true);
+ assert.equal(allowedPublicRoute("POST", ["jobs", "preview"]), true);
  assert.equal(allowedPublicRoute("POST", ["jobs", "job_123", "stop"]), true);
  for (const path of [["agents", "srv_123", "commands"], ["docker"], ["..", "agents"], ["jobs%2f.."], ["jobs", ".", "stop"]]) assert.equal(allowedPublicRoute("GET", path), false);
  assert.equal(allowedPublicRoute("DELETE", ["jobs", "job_123"]), false);

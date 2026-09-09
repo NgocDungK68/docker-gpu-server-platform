@@ -61,8 +61,8 @@ Nguồn định nghĩa chính: [domain/model.go][model]. Nguồn hành vi: [appl
 | Nhóm field | Ý nghĩa |
 |---|---|
 | Specification | `Name`, `Image`, `Backend`, `Command []string`, `Environment map[string]string`. `Job.Command` là argv của container, khác entity `domain.Command`. |
-| ResourceRequest | `GPUCount`, `GPUModel`, `MinVRAMMiB`, `CPUMilli`, `MemoryMiB`, `AllowSharedGPU`. MinVRAM là bộ nhớ còn lại yêu cầu **trên mỗi GPU**. CPU/RAM gửi thành Docker limits, scheduler chưa accounting capacity CPU/RAM. |
-| Scheduling | `Priority`, `ServerSelector`, `Strategy`, `Assignment *Assignment`. GPUCount phải 1..64, priority 0..1000; sharing bị từ chối ở [validateJobRequest][validation]. |
+| ResourceRequest | `GPUCount`, `PerformanceProfile`, `FP8Required`, private `ResolvedModels`, `MinVRAMMiB`, `CPUMilli`, `MemoryMiB`, `AllowSharedGPU`; `GPUModel` chỉ giữ cho Job cũ/benchmark. MinVRAM là bộ nhớ còn lại yêu cầu **trên mỗi GPU**. CPU/RAM gửi thành Docker limits, scheduler chưa accounting capacity CPU/RAM. |
+| Scheduling | `Priority`, `ServerSelector`, `Strategy`, `Assignment *Assignment`. Priority/ServerSelector/GPUModel chỉ còn là legacy/internal, không nhận từ Create API; Strategy do config. Count/TTL max theo config, VRAM >0; sharing bị từ chối ở [validateJobRequest][validation]. |
 | Lifecycle | `Status`, `StatusReason`, `CreatedAt`, `UpdatedAt`, `LastObservedAt`, `ContainerID`, `Events []JobEvent`. |
 
 Không có hai field `DesiredState` / `ActualState` riêng. `Status` kết hợp tiến độ điều khiển và kết quả quan sát; actual Docker state còn nằm trong Container. `LastObservedAt` chỉ cập nhật khi tìm thấy container tương ứng, không phải timestamp của mọi lần reconciliation.
@@ -70,6 +70,20 @@ Không có hai field `DesiredState` / `ActualState` riêng. `Status` kết hợp
 **Relationships:** 0..1 Assignment; 0..n JobEvent; Start/Stop commands tham chiếu jobId qua payload. `ContainerID` là một ID được ACK/observation chọn; không có constraint buộc inventory chỉ có duy nhất một container cho Job.
 
 **Lifecycle owner:** CP `CreateJob`, `ScheduleOnce`, `StopJob`; repository commit/ACK/inventory reconciliation đổi trạng thái dưới lock. Agent thực thi command rồi báo kết quả, không trực tiếp sửa Job trong store. Terminal Job giữ lịch sử; không có retry/resubmit/delete Job API hoặc tự chuyển terminal về queue.
+
+### 1.4a AllocationIntent, PolicyDecision và public request
+
+Định nghĩa tại `internal/domain/allocation.go`; cùng identity/owner với Job, không thêm Allocation Request/Quota/Planning entity độc lập.
+
+- `AllocationIntent`: WorkloadType, NecessityLevel, NecessityReason, NecessityExplanation, SystemImportance, NeededAt (RFC3339 normalize UTC), TTLSeconds. USER-PROVIDED; xem [policy/input mapping](SCHEDULER.md).
+- `AllocationResources`: public DTO GPUCount, MinVRAMMiB, PerformanceProfile, FP8Required (pointer để reject missing/null), optional CPU/RAM; không decode GPUModel/ResolvedModels.
+- `ResourceRequest`: domain/persistence constraints. `prepareJob` resolve models tương thích profile **và** FP8, lưu private trước scheduling; `CapabilityMatches/Matches` dùng chung Plan/CommitAssignment.
+- `PolicyDecision`: Status, Reason, InSizingPlan, WithinQuota, QuotaUsage, Source, EvaluatedAt; AuxiliaryScore chỉ nội bộ. SYSTEM-DERIVED bởi `policy.Evaluator`. Snapshot lúc submit/commit; GET Queue evaluate mới. `JobView.NecessityLabel` lấy từ backend catalog.
+- `capability.Profile`: ID, Label, Models; backend catalog sở hữu. Đây là compatibility group, chưa chứng nhận measured performance.
+- `policy.FactsProvider` tách Planning/Quota; `DevelopmentFacts` là cấu hình demo tĩnh, không quota ledger.
+- `application.JobPreview/ResourceMatch/AllocationOptions` là read DTO; preview không identity/persistence/command/reservation.
+
+NeededAt là nhu cầu mong muốn, cho phép quá khứ; waiting từ Job.CreatedAt của CP. TTL chỉ lưu/validate thời lượng, chưa stop/reclaim/hẹn lịch. Gob version 1 đọc được Job cũ với zero-value intent, resource constraints/Assignment cũ giữ nguyên; public Create mới yêu cầu đủ intent.
 
 ### 1.5 Workload, External/Existing Workload và Managed Workload
 
@@ -265,12 +279,25 @@ Không đưa một Docker lifecycle đầy đủ vào tài liệu như thể AIW
 
 | Scope | Giá trị đang có | Owner / semantics |
 |---|---|---|
-| `SchedulingStrategy` | `first-fit`, `best-fit`, `bin-pack`, `fragmentation-aware` | Job submit/default config chọn; `ValidStrategy` validate; [Scheduler.Plan][scheduler] thực thi bốn policy. Không phải lifecycle state. |
+| `SchedulingStrategy` | `first-fit`, `best-fit`, `bin-pack`, `fragmentation-aware` | Control Plane config chọn, Create DTO không nhận strategy; `ValidStrategy` validate; [Scheduler.Plan][scheduler] thực thi bốn policy. Không phải lifecycle state. |
 | `ExecutionBackend` | Go khai báo `DOCKER` **và `KUBERNETES`** | `CreateJob` default DOCKER; `validateJobRequest` chỉ nhận DOCKER. KUBERNETES là constant còn tồn tại, chưa có execution implementation; OpenAPI/frontend chỉ nhận DOCKER. |
 | `AllowSharedGPU` | bool, public API chỉ chấp nhận false | Không có mode sharing/MIG/time-slicing implementation. |
 | Protocol | `ProtocolVersion="v1"` | Register kiểm tra version; không phải Agent status. |
 | Process probes | CP `/healthz`: `ok`; `/readyz`: `ready` | [httpapi handlers][http]. Không mô tả readiness của GPU/Agent. |
 | Console connectivity | `HealthStatus.status`: `ok` / `unreachable` | [BFF health GET][bff-health] dựa vào fetch /healthz; không lưu vào domain.Server. |
+
+### 3.8 Business enums và PolicyStatus
+
+`domain/allocation.go` thêm bốn typed enums, độc lập Job.Status:
+
+| Type | Toàn bộ giá trị | Owner/trigger |
+|---|---|---|
+| WorkloadType | TRAINING, INFERENCE | User chọn; validate admission, bất biến sau Create. |
+| NecessityLevel | NECESSITY_1, NECESSITY_2, NECESSITY_3, NECESSITY_4 | User chọn; policy.Validate kiểm tra level/reason. |
+| SystemImportance | CRITICAL_SPECIAL, VERY_IMPORTANT, IMPORTANT, NORMAL | User chọn category; backend derive 1.4/1.2/1.0/0.8. |
+| PolicyStatus | AUTO_ELIGIBLE, COMPETITIVE | Engine.Evaluate: plan && quota → AUTO_ELIGIBLE; còn lại COMPETITIVE. |
+
+Evaluate lại có thể chuyển hai PolicyStatus qua lại khi facts đổi, tại submit/GET Queue/cycle; đây là kết quả đánh giá, không thêm Job state. Provider demo không tự đổi facts khi Job chạy. Job cũ mang zero-value business fields; không invent enum UNKNOWN.
 
 ## 4. State transitions
 
@@ -418,7 +445,7 @@ Ownership hiện dựa trên labels và trusted Agent, không có chứng thực
 | Occupied | Có consumer/grant/unknown evidence; hoặc từ tổng hợp `GPUsOccupied` với nghĩa rộng hơn bên dưới. | Không có một bool Occupied riêng hay phép đo duy nhất bao trùm mọi semantics. |
 | Schedulable GPU | `GPU.Schedulable()` = Healthy && State==FREE && AssignedJobID rỗng. | Helper này chưa xét Server hoặc Job. |
 | Schedulable Server | Status==ONLINE, !Drained, receipt inventory khác zero, tuổi LastHeartbeatAt và InventoryReceivedAt đều <= offlineAfter. | Server schedulable vẫn có thể không có đủ GPU cho Job. |
-| Schedulable cho Job | Hai helper trên + selector labels, model EqualFold, MinVRAM trên từng GPU, đủ GPUCount **ở cùng host**; được recheck tại commit. | Chưa có host CPU/RAM admission accounting, GPU sharing, placement đa host. |
+| Schedulable cho Job | Hai helper trên + profile/FP8 qua ResolvedModels, MinVRAM trên từng GPU, đủ GPUCount **ở cùng host**; được recheck tại commit. | Chưa có host CPU/RAM admission accounting, GPU sharing, placement đa host. |
 | Unknown occupancy | OCCUPIED_UNKNOWN do process không rõ owner hoặc telemetry vượt ngưỡng nhưng không có active attribution. Collector default memory >=256 MiB **hoặc** utilization >=5%; có thể override bằng InventoryPolicy/config. | Unknown không có nghĩa free; usage thấp hơn ngưỡng không chứng minh tuyệt đối không có consumer. |
 
 **Thứ tự ưu tiên thật của `normalizeGPUState`** (chọn nhánh đầu tiên phù hợp):
@@ -464,6 +491,15 @@ Reservation map được dựng từ nonterminal Job + Assignment, **không đ�
 | Offline/CP restart giữ last-known Job/inventory; không tự stop container hoặc tự reschedule Job đã assign. | [MarkStaleServers][store], [Runner.Run/loops][runner], [durable.Open][durable]. | `TestCancelQueuedJobAndOfflineInventoryPreserved`; `TestRestartPreservesStateAndExcludesStaleInventory`; [recovery.py][recovery] kiểm tra disconnect/restart với simulator. Chưa có real NVIDIA/CUDA survival test. |
 | Sequence cũ bị từ chối; UUID không được xuất hiện trên hai Server inventories cùng lúc. | [inventoryToDomain][mapping] + [ReplaceInventory][store]. | Chưa thấy test chuyên biệt cho stale sequence/global duplicate UUID trong các Go test đã audit; không gán atomic-reservation test thành bằng chứng cho invariant này. |
 
+Invariants allocation bổ sung:
+
+| Invariant | Implementation | Test |
+|---|---|---|
+| Preview không tạo Job/command/reservation | PreviewJob: prepare + read/Plan | TestResourceMatchingAndPreviewHasNoMutation |
+| Submit không tin preview, không bypass queue | prepareJob/matchJob + Queue.Order + CommitAssignment | TestSubmitReevaluatesPreviewAndSchedulingRechecks |
+| Necessity không bị auxiliary score đảo trong cùng lane | policy.Before | TestLexicographicOrdering |
+| Profile/FP8 recheck lúc commit | ResourceRequest.Matches + private ResolvedModels | TestPolicyOrderDeterminesWinnerAndCommitRechecksCapability; TestCatalogFP8ResolutionAndUnknownModels |
+
 ## 8. Source of truth: domain, persistence, API và runtime
 
 | Lớp | Nguồn chính xác | Mapping / khác biệt |
@@ -498,6 +534,7 @@ Reservation map được dựng từ nonterminal Job + Assignment, **không đ�
 | Reconciliation chọn một container cho Job, ưu tiên active; không enforce unique JobID trên inventory. | ContainerID không chứng minh một-một tuyệt đối. Unknown runtime state có record không đi nhánh missing; có thể giữ Job/reservation vô hạn do chưa có timeout cho trường hợp này. |
 | Freshness dùng CP receipt, nhưng STARTING-missing guard so Agent ObservedAt với CP UpdatedAt. | Sequence ngăn replay thứ tự, chưa giải quyết clock skew cho guard này. Chưa có test clock-skew chuyên biệt. |
 | Summary dùng “occupied” = mọi state khác FREE; online gồm cả DRAINING. | Không coi mọi counter là actual GPU utilization hay cộng free+occupied thành total trong mọi tình huống. |
+| Trang GPU inventory frontend đếm State=FREE cho ô “Sẵn sàng”, chưa xét Server readiness. | Có thể khác CP Summary.gpusFree trên host offline/stale/drained; xem [API audit](API_TESTING_POSTMAN.md). Không dùng số UI này như bằng chứng GPU schedulable. |
 | SQL reference có constraints/columns khác struct đang persist. | Không dùng SQL target để khẳng định runtime đã có unique GPU index, relational Command.JobID hay observed_containers table. |
 
 Tài liệu cũ đã được chỉnh để nói rõ reservation có đường RESERVED → RELEASED, Job có thể bỏ qua STARTING, trạng thái Server được dùng cho Agent, và release logic không đồng nghĩa GPU vật lý free. Không refactor model/transition để khớp tài liệu. Hướng dẫn chạy/test vẫn ở [README](../README.md) và [Windows/WSL](WINDOWS-WSL.md); bảng invariants phân biệt test sẵn có với nhánh chưa có test riêng.
@@ -518,6 +555,8 @@ Các link dưới đây trỏ đúng file đang có; tên test chi tiết và gi
 | Managed Workload / Container | Label ownership, exact DeviceRequests, start/stop | [executor][executor], [engine][engine], [lifecycle][lifecycle] | [engine tests][engine-tests], [integration][integration], [acceptance][acceptance] |
 | Container.State / Origin | Actual observations and ownership classification | [RuntimeContainer][agent-contracts], [Collector][inventory], [wire mapping][mapping] | [inventory tests][inventory-tests], [memory tests][memory-tests] |
 | Agent Command | Lease, ACK, idempotency, dependency of Stop on Start | [Command][model], [lease/ACK][store], [ACK effects][lifecycle], [Runner][runner] | [runner tests][runner-tests], [memory safety][memory-safety]; lease/stop race gaps ở mục 7/9 |
+| Policy admission/order | Lane, Necessity, quota/waiting; không là placement score | internal/policy; domain/allocation.go; application/allocation.go | policy/engine_test.go; application/allocation_test.go |
+| Profile/FP8 | Hard constraints Plan/commit | internal/capability; domain/allocation.go | capability/catalog_test.go; application/allocation_test.go |
 | Placement / strategy | Filter, score, select; không reserve trong Plan | [scheduler][scheduler], [validation][validation] | [policy/tie/filter tests][scheduler-safety], [legacy/offline tests][scheduler-tests] |
 | Persistence / recovery | Domain snapshot, atomic save/rollback, freshness reset | [snapshot][snapshot], [durable][durable], [Agent file][agent-state], [sim runtime][sim] | [durable tests][durable-tests], [state tests][state-tests], [recovery][recovery] |
 | DTO / public read model | Protocol v1, env redaction, BFF/Console contracts | [wire][wire], [mapping][mapping], [JobView][job-view], [OpenAPI][openapi], [TS types][frontend-types] | [HTTP tests][http-tests], [frontend contracts][frontend-tests], [Console E2E][console-tests] |
@@ -572,4 +611,3 @@ Các link dưới đây trỏ đúng file đang có; tên test chi tiết và gi
 [cgroup]: <../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/agent/cgroup_linux.go>
 [acceptance]: <../scripts/acceptance.py>
 [frontend-tests]: <../AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/tests/contracts.test.mjs>
-

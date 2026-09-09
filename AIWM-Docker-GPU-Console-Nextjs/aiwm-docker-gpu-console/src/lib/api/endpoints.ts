@@ -6,6 +6,8 @@ export const endpoints = {
   gpus: "/gpus",
   containers: (origin?: string) => `/containers${origin ? `?origin=${origin}` : ""}`,
   jobs: "/jobs",
+  jobOptions: "/jobs/options",
+  jobPreview: "/jobs/preview",
   job: (jobId: string) => `/jobs/${jobId}`,
   stopJob: (jobId: string) => `/jobs/${jobId}/stop`,
   queue: "/queue",

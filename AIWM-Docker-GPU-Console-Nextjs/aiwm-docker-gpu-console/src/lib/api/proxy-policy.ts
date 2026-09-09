@@ -14,6 +14,6 @@ export function allowedPublicRoute(method: string, path: string[]): boolean {
   if (!path.length || path.some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return false;
   const route = path.join("/");
   if (method === "GET") return /^(system\/summary|servers(?:\/[A-Za-z0-9_-]+)?|gpus|containers|jobs(?:\/[A-Za-z0-9_-]+)?|queue)$/.test(route);
-  if (method === "POST") return /^(jobs|jobs\/[A-Za-z0-9_-]+\/stop|servers\/[A-Za-z0-9_-]+\/drain|scheduler\/run-once)$/.test(route);
+  if (method === "POST") return /^(jobs|jobs\/preview|jobs\/[A-Za-z0-9_-]+\/stop|servers\/[A-Za-z0-9_-]+\/drain|scheduler\/run-once)$/.test(route);
   return false;
 }

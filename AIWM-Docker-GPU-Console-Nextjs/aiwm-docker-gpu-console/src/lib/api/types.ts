@@ -96,6 +96,8 @@ export interface ContainerInventoryItem {
 }
 
 export interface ResourceRequest {
+  performanceProfile?: string;
+  fp8Required: boolean;
   gpuCount: number;
   gpuModel?: string;
   minVramMiB?: number;
@@ -116,7 +118,9 @@ export interface Assignment {
   reason: string;
 }
 
-export interface Job {
+export interface Job extends Partial<AllocationIntent> {
+  policy: PolicyDecision;
+  necessityLabel: string;
   id: string;
   name: string;
   image: string;
@@ -137,20 +141,72 @@ export interface Job {
   events: JobEvent[];
 }
 
-export interface CreateJobInput {
+export type WorkloadType = "TRAINING" | "INFERENCE";
+export type NecessityLevel = "NECESSITY_1" | "NECESSITY_2" | "NECESSITY_3" | "NECESSITY_4";
+export type SystemImportance = "CRITICAL_SPECIAL" | "VERY_IMPORTANT" | "IMPORTANT" | "NORMAL";
+export interface AllocationIntent {
+  workloadType: WorkloadType;
+  necessityLevel: NecessityLevel;
+  necessityReason: string;
+  necessityExplanation?: string;
+  systemImportance: SystemImportance;
+  neededAt: string;
+  ttlSeconds: number;
+}
+export interface CreateJobInput extends AllocationIntent {
   name: string;
   image: string;
   backend: "DOCKER";
   command?: string[];
   environment?: Record<string, string>;
-  resources: ResourceRequest;
-  priority: number;
-  serverSelector?: Record<string, string>;
-  strategy: SchedulingStrategy;
+  resources: {
+    gpuCount: number;
+    minVramMiB: number;
+    performanceProfile: string;
+    fp8Required: boolean;
+    cpuMilli?: number;
+    memoryMiB?: number;
+    allowSharedGpu?: false;
+  };
+}
+export interface AllocationOption { id: string; label: string; }
+export interface AllocationOptions {
+  limits: { maxGpuCount: number; maxTtlSeconds: number };
+  workloadTypes: AllocationOption[];
+  performanceProfiles: AllocationOption[];
+  systemImportance: AllocationOption[];
+  customReason: AllocationOption;
+  necessityProfiles: { workloadType: WorkloadType; level: NecessityLevel; label: string; reasons: AllocationOption[] }[];
+}
+export interface PolicyDecision {
+  status: "AUTO_ELIGIBLE" | "COMPETITIVE";
+  reason: string;
+  inSizingPlan: boolean;
+  withinQuota: boolean;
+  quotaUsage: number;
+  source: string;
+  evaluatedAt: string;
+}
+export interface JobPreview {
+  workloadType: WorkloadType;
+  policyStatus: PolicyDecision["status"];
+  policyReason: string;
+  necessityLabel: string;
+  sizingPlanStatus: string;
+  quotaStatus: string;
+  policySource: string;
+  evaluatedAt: string;
+  resourceMatch: {
+    satisfiable: boolean;
+    recommendedGpuModels: string[];
+    matchedGpuCount: number;
+    recommendationText: string;
+    unsatisfiedReason?: string;
+  };
 }
 
 export interface APIErrorBody {
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; fields?: Record<string, string> };
 }
 
 export interface APIEnvelope<T> {

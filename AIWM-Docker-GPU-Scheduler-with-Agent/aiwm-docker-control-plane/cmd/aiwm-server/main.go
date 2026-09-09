@@ -13,6 +13,7 @@ import (
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/application"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/config"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/httpapi"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/policy"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/store/durable"
 )
 
@@ -35,6 +36,8 @@ func main() {
 		EnrollmentToken: configuration.EnrollmentToken, HeartbeatInterval: configuration.HeartbeatInterval,
 		OfflineAfter: configuration.OfflineAfter, CommandLease: configuration.CommandLease,
 		DefaultStrategy: configuration.SchedulerStrategy,
+		Policy:          policy.New(policy.DevelopmentFacts{InSizingPlan: configuration.DevelopmentInSizingPlan, QuotaGPUs: configuration.DevelopmentQuotaGPUs, UsedGPUs: configuration.DevelopmentUsedGPUs}),
+		RequestLimits:   application.RequestLimits{MaxGPUCount: configuration.MaxGPUCount, MaxTTLSeconds: configuration.MaxTTLSeconds},
 	})
 	api := httpapi.New(controlPlane, logger, configuration.CORSOrigins, httpapi.Options{PublicAPIToken: configuration.PublicAPIToken})
 	server := &http.Server{

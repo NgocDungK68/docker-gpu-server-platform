@@ -14,11 +14,16 @@ import (
 	"time"
 
 	agentv1 "github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agentprotocol/v1"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/capability"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/domain"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/policy"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/ports"
 )
 
 type ControlPlane struct {
+	policy            policy.Evaluator
+	catalog           capability.Resolver
+	limits            RequestLimits
 	repository        ports.Repository
 	scheduler         Scheduler
 	enrollmentToken   string
@@ -29,6 +34,11 @@ type ControlPlane struct {
 }
 
 type Options struct {
+	// PlacementPolicy optionally replaces the configured scorer at composition time.
+	PlacementPolicy   SchedulingPolicy
+	Policy            policy.Evaluator
+	Catalog           capability.Resolver
+	RequestLimits     RequestLimits
 	EnrollmentToken   string
 	HeartbeatInterval time.Duration
 	OfflineAfter      time.Duration
@@ -37,9 +47,28 @@ type Options struct {
 }
 
 func New(repository ports.Repository, options Options) *ControlPlane {
-	return &ControlPlane{
+	if options.Policy == nil {
+		options.Policy = policy.New(policy.DevelopmentFacts{QuotaGPUs: 4})
+	}
+	if options.Catalog == nil {
+		options.Catalog = capability.Default()
+	}
+	if options.RequestLimits.MaxGPUCount == 0 {
+		options.RequestLimits.MaxGPUCount = DefaultRequestLimits().MaxGPUCount
+	}
+	if options.RequestLimits.MaxTTLSeconds == 0 {
+		options.RequestLimits.MaxTTLSeconds = DefaultRequestLimits().MaxTTLSeconds
+	}
+	if options.DefaultStrategy == "" {
+		options.DefaultStrategy = domain.StrategyBestFit
+	}
+	scheduler := NewScheduler(options.DefaultStrategy, options.OfflineAfter)
+	if options.PlacementPolicy != nil {
+		scheduler = scheduler.WithPolicy(options.DefaultStrategy, options.PlacementPolicy)
+	}
+	return &ControlPlane{policy: options.Policy, catalog: options.Catalog, limits: options.RequestLimits,
 		repository:        repository,
-		scheduler:         NewScheduler(options.DefaultStrategy, options.OfflineAfter),
+		scheduler:         scheduler,
 		enrollmentToken:   options.EnrollmentToken,
 		heartbeatInterval: options.HeartbeatInterval,
 		offlineAfter:      options.OfflineAfter,
@@ -139,28 +168,23 @@ func (c *ControlPlane) presentServer(server domain.Server) domain.Server {
 	return server
 }
 
+// CreateJob refreshes policy and resources, then joins the shared queue.
+// Scheduling re-evaluates all contenders before atomic assignment; submit cannot jump the queue.
 func (c *ControlPlane) CreateJob(ctx context.Context, request domain.CreateJobRequest) (domain.Job, error) {
-	if request.Backend == "" {
-		request.Backend = domain.BackendDocker
-	}
-	if request.Strategy == "" {
-		request.Strategy = c.scheduler.defaultStrategy
-	}
-	if err := validateJobRequest(request); err != nil {
-		return domain.Job{}, err
-	}
-	id, err := newID("job")
+	job, err := c.prepareJob(ctx, request)
 	if err != nil {
 		return domain.Job{}, err
 	}
-	now := c.now().UTC()
-	job := domain.Job{
-		ID: id, Name: request.Name, Image: request.Image, Backend: request.Backend, Command: request.Command,
-		Environment: request.Environment, Resources: request.Resources, Priority: request.Priority,
-		ServerSelector: request.ServerSelector, Strategy: request.Strategy, Status: domain.JobQueued,
-		StatusReason: "waiting for scheduler", CreatedAt: now, UpdatedAt: now,
-		Events: []domain.JobEvent{{JobID: id, Status: domain.JobQueued, Reason: "waiting for scheduler", At: now}},
+	match, err := c.matchJob(ctx, job)
+	if err != nil {
+		return domain.Job{}, err
 	}
+	job.ID, err = newID("job")
+	if err != nil {
+		return domain.Job{}, err
+	}
+	job.StatusReason = match.RecommendationText
+	job.Events = []domain.JobEvent{{JobID: job.ID, Status: domain.JobQueued, Reason: job.StatusReason, At: job.CreatedAt}}
 	if err := c.repository.CreateJob(ctx, job); err != nil {
 		return domain.Job{}, err
 	}
@@ -176,11 +200,15 @@ func (c *ControlPlane) ListJobs(ctx context.Context) ([]domain.Job, error) {
 }
 
 func (c *ControlPlane) Queue(ctx context.Context) ([]domain.Job, error) {
-	return c.repository.ListQueuedJobs(ctx)
+	jobs, err := c.repository.ListQueuedJobs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.policy.Order(ctx, jobs, c.now().UTC())
 }
 
 func (c *ControlPlane) ScheduleOnce(ctx context.Context) (int, error) {
-	jobs, err := c.repository.ListQueuedJobs(ctx)
+	jobs, err := c.Queue(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -221,6 +249,7 @@ func (c *ControlPlane) ScheduleOnce(ctx context.Context) (int, error) {
 			ID: commandID, AgentID: placement.ServerID, Type: domain.CommandStartContainer,
 			Status: domain.CommandPending, Payload: payload, CreatedAt: c.now().UTC(),
 		}
+		placement.Policy = job.Policy
 		if _, err := c.repository.CommitAssignment(ctx, job.ID, placement, command, c.now().UTC()); err != nil {
 			if errors.Is(err, domain.ErrConflict) {
 				servers, _ = c.repository.ListServers(ctx)

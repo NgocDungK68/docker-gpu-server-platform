@@ -165,6 +165,8 @@ type GPUProcess struct {
 }
 
 type Job struct {
+	AllocationIntent
+	Policy         PolicyDecision     `json:"policy"`
 	ID             string             `json:"id"`
 	Name           string             `json:"name"`
 	Image          string             `json:"image"`
@@ -186,12 +188,15 @@ type Job struct {
 }
 
 type ResourceRequest struct {
-	GPUCount       int    `json:"gpuCount"`
-	GPUModel       string `json:"gpuModel,omitempty"`
-	MinVRAMMiB     int64  `json:"minVramMiB,omitempty"`
-	CPUMilli       int64  `json:"cpuMilli,omitempty"`
-	MemoryMiB      int64  `json:"memoryMiB,omitempty"`
-	AllowSharedGPU bool   `json:"allowSharedGpu"`
+	PerformanceProfile string   `json:"performanceProfile,omitempty"`
+	FP8Required        bool     `json:"fp8Required"`
+	ResolvedModels     []string `json:"-"`
+	GPUCount           int      `json:"gpuCount"`
+	GPUModel           string   `json:"gpuModel,omitempty"`
+	MinVRAMMiB         int64    `json:"minVramMiB,omitempty"`
+	CPUMilli           int64    `json:"cpuMilli,omitempty"`
+	MemoryMiB          int64    `json:"memoryMiB,omitempty"`
+	AllowSharedGPU     bool     `json:"allowSharedGpu"`
 }
 
 type Assignment struct {
@@ -221,6 +226,7 @@ type Command struct {
 }
 
 type Placement struct {
+	Policy   PolicyDecision     `json:"-"`
 	ServerID string             `json:"serverId"`
 	GPUUUIDs []string           `json:"gpuUuids"`
 	Strategy SchedulingStrategy `json:"strategy"`
