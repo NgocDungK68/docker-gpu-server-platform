@@ -120,6 +120,8 @@ Queue theo policy lane → Necessity → auxiliary priority → CreatedAt/ID; us
 
 Xem [Domain Model: entities, relationships, states và invariants](docs/DOMAIN_MODEL.md), [kiến trúc chi tiết](docs/ARCHITECTURE.md), [scheduler](docs/SCHEDULER.md) và [scope → source → test](docs/TRACEABILITY.md).
 
+[System Design: diagram luồng xử lý, source mapping và design observations](docs/SYSTEM_DESIGN.md).
+
 ## Policy-driven GPU Allocation
 
 User chọn nhu cầu, Policy Engine xếp thứ tự phục vụ, Scheduler chọn GPU/server. Create API bỏ `priority`, `strategy`, `serverSelector`, `resources.gpuModel`; client cũ gửi chúng nhận 400. Xem [input/policy và extension boundaries](docs/SCHEDULER.md).
