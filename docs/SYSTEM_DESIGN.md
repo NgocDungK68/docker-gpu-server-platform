@@ -150,7 +150,7 @@ sequenceDiagram
     M->>M: agentconfig.Load
     M->>D: New(local endpoint)
     M->>N: gpu.New / nvml.Init
-    M->>R: compose collector, client, executor, state; Run
+    M->>R: compose collector, client, executor, state, Run
     R->>F: Load identity, sequence, processed results
     R->>R: kiểm tra MachineID
     loop startup đến khi thành công hoặc context bị hủy
