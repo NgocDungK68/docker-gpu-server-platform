@@ -3,13 +3,17 @@ package config
 import (
 	"bufio"
 	"fmt"
-	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent"
 )
+
+// ReleaseControlPlaneURL được inject khi build; env luôn có quyền override.
+var ReleaseControlPlaneURL string
 
 type Config struct {
 	ControlPlaneURL  string
@@ -34,9 +38,9 @@ func Load() (Config, error) {
 	return load(false)
 }
 
-func LoadForCheck() (Config,error) { return load(true) }
+func LoadForCheck() (Config, error) { return load(true) }
 
-func load(checkOnly bool) (Config,error) {
+func load(checkOnly bool) (Config, error) {
 	if err := loadDotEnv(".env.agent"); err != nil {
 		return Config{}, fmt.Errorf("load .env.agent: %w", err)
 	}
@@ -50,7 +54,7 @@ func load(checkOnly bool) (Config,error) {
 	}
 	configuration := Config{
 		DockerEndpoint:  env("AIWM_DOCKER_ENDPOINT", "unix:///var/run/docker.sock"),
-		ControlPlaneURL: env("AIWM_CONTROL_PLANE_URL", "http://localhost:8080"),
+		ControlPlaneURL: env("AIWM_CONTROL_PLANE_URL", defaultControlPlaneURL()),
 		EnrollmentToken: env("AIWM_ENROLLMENT_TOKEN", ""),
 		MachineID:       machineID, Name: env("AIWM_AGENT_NAME", hostname),
 		Labels:    parseLabels(os.Getenv("AIWM_AGENT_LABELS")),
@@ -97,6 +101,13 @@ func load(checkOnly bool) (Config,error) {
 		return Config{}, fmt.Errorf("request timeout must be positive")
 	}
 	return configuration, nil
+}
+
+func defaultControlPlaneURL() string {
+	if value := strings.TrimSpace(ReleaseControlPlaneURL); value != "" {
+		return value
+	}
+	return "http://localhost:8080"
 }
 
 func readMachineID() string {

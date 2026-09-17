@@ -72,27 +72,41 @@ NEXT STEP = real GPU server support / central Agent release.
 
 ## Task hiện tại: Organization boundary + auth + onboarding (2026-09-17)
 
+CURRENT TASK: tiếp tục mentor scope từ WIP checkpoint `fffd420`.
+
+RECOVERY: đã đọc AGENTS/status, chạy git status --short, git diff --stat, git diff và git log -3; working tree sạch khi resume. Checkpoint đã chứa core implementation và phần lớn canonical docs/runbook, không làm lại các lát cắt đó.
+
 DONE:
 - Lát cắt 1: domain Organization/User/Principal, PostgreSQL metadata schema/adapter, PBKDF2 password hash, session 8 giờ, login/me/logout, ADMIN quản lý organization/user; CLI migrate/bootstrap đã nối trong aiwm-server.
 - Lát cắt 2: enrollment bind organization/machine server-side; ownership bất biến, scope API tại application; Job lấy organization từ Principal; hard filter ở preview/scheduler và kiểm tra lại trong CommitAssignment.
 - Lát cắt 3: production preflight báo SUPPORTED/DEGRADED/UNSUPPORTED, đọc OS/architecture/kernel/cgroup, Docker version/API/runtime nvidia, NVML/GPU discovery; không chạy shell probe hoặc test container. Startup/reconnect cần FULL inventory; heartbeat quay lại chưa đủ để lease START. Retry startup/heartbeat/command có backoff+jitter; inventory định kỳ giữ nhịp cũ.
 - Lát cắt 4: login nội bộ, BFF cookie HttpOnly/session, current organization/user/role; ADMIN có bộ lọc đơn vị và CRUD metadata tối thiểu; onboarding cấp token, không nhập GPU; query tài nguyên dùng organization filter do backend authorize.
 - Compose/configure: PostgreSQL service, credentials sinh local, migrate/bootstrap tường minh và token riêng từng Agent Sim. Không chạy script hoặc Compose trong task.
+- SYSTEM_DESIGN/DOMAIN_MODEL/ALGORITHMS/TECH_STACK đã cập nhật ownership; CORPORATE_POLICY và TESTING_RUNBOOK đã có; API_TESTING_POSTMAN đã cập nhật phần auth/tenancy.
+- Lát cắt 5 (resume): OpenAPI thêm session/organization/user/enrollment và ownership DTO; Postman có luồng login/enrollment/scoped resources/Job/logout, ADMIN và tenancy negatives. Fixture Agent cũ giữ lifecycle, thêm login/enrollment riêng. README chuyển sang runbook và index canonical.
+- Kiểm tra tĩnh cuối: HTTP source/OpenAPI đều có 33 method endpoints. Bổ sung regression cases login/hash/disabled identity, session scope/logout/spoofing, enrollment ownership, organization filter trước scorer, commit conflict không mutation và heartbeat chưa có FULL inventory. Chưa chạy các tests này.
+- Fixture scheduler/benchmark/allocation và memory safety đã gắn organization tường minh; không thêm fallback org rỗng trong production. Sửa ký tự onboarding và loại score khỏi recent events của summary. Không sửa công thức policy/placement.
+- Canonical docs/traceability đã đồng bộ. ARCHITECTURE.md giữ đường dẫn chuyển tiếp sau khi nội dung hợp nhất vào SYSTEM_DESIGN/DOMAIN_MODEL/ALGORITHMS. Không xóa file hoặc dữ liệu; giữ docs lịch sử còn nội dung riêng.
 
 PARTIAL:
 - Tất cả thay đổi mới chỉ được đọc/sửa tĩnh, chưa chạy migration/build/test theo yêu cầu.
 - Dependency lib/pq đã khai báo; chưa tải dependency hoặc cập nhật go.sum qua Go tool.
 - Dữ liệu runtime cũ thiếu organization được giữ nguyên và không được schedule; không tự chuyển ownership.
+- Automation lịch sử (doctor/acceptance/recovery/browser fixtures và các fixture chưa chuyển) chưa chứng nhận session/enrollment mới. Có runbook thủ công ba mức và Postman mới; chưa có script tự provision CP/database riêng cho protocol fixture.
+- Chưa có kiểm chứng PostgreSQL transaction/bind concurrency thực tế hoặc GPU Linux thật. Preflight chỉ kiểm tra nền tảng, không chứng nhận CUDA/CDI-only.
 
 TODO:
-- Docs canonical, OpenAPI/Postman, TESTING_RUNBOOK, kiểm tra tĩnh thay đổi.
+- Người dùng chạy dependency resolution, format/check/build/tests và migration theo TESTING_RUNBOOK khi cho phép; review go.mod/go.sum sau go mod tidy.
+- Kiểm chứng local → fake Agent/NVML → real Linux GPU và failure/reconnect. Không dùng kết quả PASS lịch sử để kết luận scope mới đã đạt.
 
-FILES CHANGED:
-- Backend: domain/{organization,model,errors}; ports/metadata; store/postgres/{store,001_metadata.sql}; application/{identity,tenancy,controlplane,allocation,scheduler}; store/memory/store; httpapi/{identity,server,job_view}; config/config; cmd/aiwm-server/main; go.mod.
-- docs/IMPLEMENTATION_STATUS.md.
-- Pre-existing: README.md modified; docs/ALGORITHMS.md và docs/TECH_STACK.md untracked. Không reset/revert.
+FILES CHANGED (phiên resume, 21 file; Backend/Frontend dùng hai project ở AGENTS.md):
+- Backend: api/openapi.yaml; cmd/aiwm-scheduler-bench/main.go; internal/application/{allocation_test,scheduler_test,scheduler_safety_test,identity_test}.go; internal/httpapi/{server,identity_test}.go; internal/store/memory/safety_test.go.
+- Frontend: src/app/(console)/onboarding/page.tsx.
+- Workspace: README.md; postman/AIWM.postman_collection.json; postman/AIWM.local.postman_environment.json.
+- Docs: ALGORITHMS.md, API_TESTING_POSTMAN.md, ARCHITECTURE.md, DOMAIN_MODEL.md, IMPLEMENTATION_STATUS.md, TECH_STACK.md, TESTING_RUNBOOK.md, TRACEABILITY.md.
+- Core mentor implementation còn lại đã nằm trong checkpoint fffd420; không reset/revert.
 
-NEXT STEP: docs/Postman/runbook và kiểm tra tĩnh. Các kết quả test bên dưới thuộc task cũ, không chứng nhận task hiện tại.
+NEXT STEP: chạy thủ công docs/TESTING_RUNBOOK.md LEVEL 1 (configure → PostgreSQL → go mod tidy → --migrate → --bootstrap-admin → CP/frontend/login), rồi LEVEL 2/3. Phiên này dừng ở implementation/documentation và inspection tĩnh; không chạy build/test/migration/network. Các kết quả test bên dưới thuộc task cũ, không chứng nhận task hiện tại.
 
 ---
 

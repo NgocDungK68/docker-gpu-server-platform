@@ -10,7 +10,7 @@ import (
 func TestAllPoliciesAndDeterministicTies(t *testing.T) {
 	now := time.Now()
 	makeServer := func(id string, free int) domain.Server {
-		s := domain.Server{ID: id, Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now}
+		s := domain.Server{OrganizationID: "test-org", ID: id, Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now}
 		for i := 0; i < 4; i++ {
 			state := domain.GPUOccupiedLegacy
 			if i < free {
@@ -29,7 +29,7 @@ func TestAllPoliciesAndDeterministicTies(t *testing.T) {
 				want = "a-empty"
 			}
 			for _, input := range [][]domain.Server{servers, {servers[1], servers[0]}} {
-				placement, err := scheduler.Plan(domain.Job{Resources: domain.ResourceRequest{GPUCount: 1}}, input, now)
+				placement, err := scheduler.Plan(domain.Job{OrganizationID: "test-org", Resources: domain.ResourceRequest{GPUCount: 1}}, input, now)
 				if err != nil || placement.ServerID != want {
 					t.Fatalf("got %+v %v, want %s", placement, err, want)
 				}
@@ -56,8 +56,8 @@ func TestSchedulerFiltersAndPendingReasons(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := domain.Server{ID: "s", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-0", domain.GPUFree)}}
-			j := domain.Job{Resources: domain.ResourceRequest{GPUCount: 1}}
+			s := domain.Server{OrganizationID: "test-org", ID: "s", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-0", domain.GPUFree)}}
+			j := domain.Job{OrganizationID: "test-org", Resources: domain.ResourceRequest{GPUCount: 1}}
 			tc.mutate(&s, &j)
 			_, err := NewScheduler(domain.StrategyBestFit, time.Minute).Plan(j, []domain.Server{s}, now)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -71,9 +71,9 @@ func TestSchedulerFiltersAndPendingReasons(t *testing.T) {
 func TestInjectedPlacementPolicyKeepsHardConstraints(t *testing.T) {
 	now := time.Now()
 	servers := []domain.Server{
-		{ID: "a", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-a", domain.GPUFree)}},
-		{ID: "b", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-b", domain.GPUFree)}},
-		{ID: "c", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-c", domain.GPUOccupiedLegacy)}},
+		{OrganizationID: "test-org", ID: "a", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-a", domain.GPUFree)}},
+		{OrganizationID: "test-org", ID: "b", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-b", domain.GPUFree)}},
+		{OrganizationID: "test-org", ID: "c", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-c", domain.GPUOccupiedLegacy)}},
 	}
 	scorer := scoreFunc(func(server domain.Server, _, _ []domain.GPU) float64 {
 		if server.ID == "c" {
@@ -85,9 +85,44 @@ func TestInjectedPlacementPolicyKeepsHardConstraints(t *testing.T) {
 		return 0
 	})
 	scheduler := NewScheduler(domain.StrategyBestFit, time.Minute).WithPolicy(domain.StrategyBestFit, scorer)
-	job := domain.Job{Strategy: domain.StrategyFirstFit, Resources: domain.ResourceRequest{GPUCount: 1}}
+	job := domain.Job{OrganizationID: "test-org", Strategy: domain.StrategyFirstFit, Resources: domain.ResourceRequest{GPUCount: 1}}
 	placement, err := scheduler.Plan(job, servers, now)
 	if err != nil || placement.ServerID != "b" || placement.Strategy != domain.StrategyBestFit {
 		t.Fatalf("%+v %v", placement, err)
+	}
+}
+
+func TestOrganizationFilterPrecedesScoringForEveryStrategy(t *testing.T) {
+	now := time.Now()
+	servers := []domain.Server{
+		{ID: "foreign", OrganizationID: "other-org", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-foreign", domain.GPUFree)}},
+		{ID: "own", OrganizationID: "test-org", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-own", domain.GPUFree)}},
+	}
+	for _, strategy := range []domain.SchedulingStrategy{domain.StrategyFirstFit, domain.StrategyBestFit, domain.StrategyBinPack, domain.StrategyFragmentation} {
+		t.Run(string(strategy), func(t *testing.T) {
+			job := domain.Job{OrganizationID: "test-org", Resources: domain.ResourceRequest{GPUCount: 1}}
+			scored := 0
+			scorer := scoreFunc(func(server domain.Server, _, _ []domain.GPU) float64 {
+				scored++
+				if server.OrganizationID != job.OrganizationID {
+					t.Fatal("foreign organization reached placement scoring")
+				}
+				return 0
+			})
+			scheduler := NewScheduler(strategy, time.Minute).WithPolicy(strategy, scorer)
+			placement, err := scheduler.Plan(job, servers, now)
+			if err != nil || placement.ServerID != "own" || scored != 1 {
+				t.Fatalf("placement=%+v scored=%d err=%v", placement, scored, err)
+			}
+			for _, org := range []string{"missing-org", ""} {
+				job.OrganizationID = org
+				if _, err := scheduler.Plan(job, servers, now); err == nil {
+					t.Fatalf("unexpected cross-organization placement for %q", org)
+				}
+			}
+			if scored != 1 {
+				t.Fatal("rejected organization reached scorer")
+			}
+		})
 	}
 }

@@ -12,7 +12,7 @@ Không public self-registration. Bootstrap admin đầu tiên qua CLI `aiwm-serv
 | GET /api/v1/auth/me | Bearer access_token | 200 user.id/username/role/organizationId/enabled và organization metadata. |
 | POST /api/v1/auth/logout | Bearer access_token | 200 loggedOut=true; token cũ không còn hợp lệ. |
 
-Session có TTL 8 giờ, hash lưu PostgreSQL; không JWT/refresh token. PasswordHash PBKDF2-SHA256 không serialize JSON. Đổi User thu hồi session cũ. PostgreSQL unavailable không fallback sang bearer chung. Header `AIWM_API_TOKEN` không còn là credential production.
+Session có TTL 8 giờ, hash lưu PostgreSQL; không JWT/refresh token. PasswordHash PBKDF2-SHA256 không serialize JSON. Đổi User thu hồi session cũ. PostgreSQL unavailable không fallback sang bearer chung. Biến cấu hình `AIWM_API_TOKEN` không còn là credential production.
 
 ## 2. Organizations và Users (ADMIN)
 
@@ -54,7 +54,8 @@ Import `postman/AIWM.postman_collection.json` và `AIWM.local.postman_environmen
 | organization_id / current_role | Current user tự capture. |
 | enrollment_id / enrollment_token | Create enrollment tự capture. |
 | agent_id / agent_token | Register fixture capture, **không dùng credential của Agent thật đang chạy**. |
-| fixture_machine_id / fixture_gpu_* | Fixture độc lập, sinh khi tạo enrollment. |
+| manual_machine_id / manual_gpu_uuid / manual_external_gpu_uuid | Fixture độc lập, sinh khi tạo enrollment/register nội bộ. |
+| internal_username / internal_password / internal_access_token | Account ADMIN riêng của CP fixture; không dùng session của base_url. |
 | job_id / command_id / inventory_sequence | Response hoặc script fixture cập nhật. |
 | other_organization_id / other_server_id / other_job_id | ID ngoài đơn vị để thử tenancy; lấy bằng account ADMIN, không lấy secret của người khác. |
 | organization_code / organization_name / new_username / new_password | Metadata tạo qua folder ADMIN, không hardcode vào business logic. |
@@ -74,7 +75,7 @@ Gửi từng bước, không chạy toàn collection cũ một lượt:
 11. Stop → actual terminal inventory → Job terminal + reservation RELEASED.
 12. Logout; dùng token vừa logout GET me phải 401.
 
-Các folders cũ được giữ để không mất fixture/error examples, nhưng auth/enrollment assumptions cũ phải được sửa khi dùng lại. Số liệu PASS/Newman của task trước không chứng nhận tenancy/session mới. Không dùng scripts acceptance/recovery cũ như một phép kiểm thử tenant-aware.
+Các folders cũ được giữ để không mất fixture/error examples, nhưng phải login bằng session và chuẩn bị inventory phù hợp khi dùng lại; folder protocol đã thêm login/enrollment riêng. Số liệu PASS/Newman của task trước không chứng nhận tenancy/session mới. Không dùng scripts acceptance/recovery cũ như một phép kiểm thử tenant-aware.
 
 ## 6. Ma trận kiểm thử tenancy tối thiểu
 
@@ -891,7 +892,7 @@ POST /api/v1/scheduler/run-once
 
 - **Purpose:** lấy choices/labels/reasons/profile IDs và limits từ backend.
 - **Scope:** Create Request, Policy profile, Capability catalog.
-- **Prerequisite:** CP + Authorization Bearer public token; không cần Agent.
+- **Prerequisite:** CP + Authorization Bearer session token; không cần Agent.
 - **Input:** không body.
 - **Policy behavior:** đọc cấu hình, không evaluate/reserve.
 - **Expected result:** 200 data gồm limits.maxGpuCount/maxTtlSeconds, workloadTypes, performanceProfiles, necessityProfiles, systemImportance, customReason. Có 8 necessity profiles theo 2 workloads × 4 cấp; không trả coefficient/model mapping nội bộ.
@@ -932,8 +933,9 @@ Ví dụ theo demo A100/T4 trống, quota defaults; số lượng thay đổi th
 
 ## 9. Agent/Internal APIs — CP protocol test riêng
 
-- Fixture JSON ở folder Internal không phải observation được Docker/NVML thật xác minh.
-- Đây là protocol Agent, không phải frontend onboarding/user login API. Chạy đầy đủ folder 08 để capture IDs đúng thứ tự.
+- Fixture JSON ở folder protocol không phải observation được Docker/NVML thật xác minh.
+- Chỉ bật enable_agent_internal=true khi đã có CP fixture riêng (internal_base_url), state và PostgreSQL database test riêng. Điền internal_username/internal_password của ADMIN trên CP đó; không dùng session base_url. Repo chưa có script tự provision database/CP fixture độc lập: xem TODO trong runbook. Full fake E2E dùng Agent Sim, không cần fixture thủ công này.
+- Đây là protocol Agent, không phải frontend onboarding/user login API. Dùng folder Organization - Protocol nội bộ theo thứ tự login → enrollment → register → inventory → Job/command/lifecycle.
 
 ### 9.1. `POST /api/v1/agents/register`
 

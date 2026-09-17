@@ -1,6 +1,6 @@
 # Algorithms và decision rules của backend AIWM
 
-Đối chiếu tĩnh ngày 11/09/2026. Backend source là nguồn duy nhất cho behavior trong tài liệu; ví dụ là tính tay theo code, không phải kết quả benchmark/test. Phạm vi: request → policy/queue → filtering/placement → repository reservation/release, cùng occupancy đầu vào trực tiếp. Không khảo sát thuật toán bên ngoài hoặc frontend.
+Thuật toán đối chiếu tĩnh ngày 11/09/2026; bổ sung Organization hard filter ngày 17/09/2026. Backend source là nguồn duy nhất cho behavior trong tài liệu; ví dụ là tính tay theo code, không phải kết quả benchmark/test. Phạm vi: request → policy/queue → filtering/placement → repository reservation/release, cùng occupancy đầu vào trực tiếp. Không khảo sát thuật toán bên ngoài hoặc frontend.
 
 
 
@@ -58,7 +58,7 @@ Predicate O(1), lọc S Server O(S). Không thay complexity hoặc công thức 
 - `internal/application/controlplane.go`: `ScheduleOnce`; `tenancy.go`: `enabledOrganizations`.
 - `internal/store/memory/store.go`: `CommitAssignment` (durable.Store bọc transaction này).
 
-Công thức policy/strategy phía dưới giữ nguyên. Business baseline được giải thích riêng trong [CORPORATE_POLICY.md](CORPORATE_POLICY.md).
+Công thức policy/strategy phía dưới giữ nguyên. Các ví dụ placement cũ phía dưới giả định Job và Server cùng organization không rỗng; không có fallback cross-organization. Business baseline được giải thích riêng trong [CORPORATE_POLICY.md](CORPORATE_POLICY.md).
 
 
 ## Pipeline hiện tại

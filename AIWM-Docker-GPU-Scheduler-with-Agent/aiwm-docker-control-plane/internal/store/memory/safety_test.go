@@ -16,7 +16,7 @@ func fixture(t *testing.T) (*Store, time.Time) {
 	t.Helper()
 	s := New()
 	now := time.Now().UTC()
-	_, err := s.UpsertServer(context.Background(), domain.Server{ID: "s", MachineID: "m", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
+	_, err := s.UpsertServer(context.Background(), domain.Server{OrganizationID: "test-org", ID: "s", MachineID: "m", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
 		GPUs: []domain.GPU{{UUID: "GPU-0", Model: "A100", MemoryTotalMiB: 40000, Healthy: true, State: domain.GPUFree}}})
 	if err != nil {
 		t.Fatal(err)
@@ -25,7 +25,7 @@ func fixture(t *testing.T) (*Store, time.Time) {
 }
 func queued(t *testing.T, s *Store, id string, priority int, now time.Time) {
 	t.Helper()
-	if err := s.CreateJob(context.Background(), domain.Job{ID: id, Status: domain.JobQueued, Priority: priority, CreatedAt: now, Resources: domain.ResourceRequest{GPUCount: 1}}); err != nil {
+	if err := s.CreateJob(context.Background(), domain.Job{OrganizationID: "test-org", ID: id, Status: domain.JobQueued, Priority: priority, CreatedAt: now, Resources: domain.ResourceRequest{GPUCount: 1}}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -56,6 +56,50 @@ func TestConcurrentReservationHasOneWinner(t *testing.T) {
 	wg.Wait()
 	if successes.Load() != 1 {
 		t.Fatalf("winners=%d", successes.Load())
+	}
+}
+
+func TestReservationRejectsChangedOrMissingOrganizationWithoutMutation(t *testing.T) {
+	for _, org := range []string{"other-org", ""} {
+		t.Run(org, func(t *testing.T) {
+			s, now := fixture(t)
+			queued(t, s, "j", 0, now)
+			// Placement có thể được tính từ snapshot cũ; commit phải kiểm tra lại ownership.
+			server := s.servers["s"]
+			server.OrganizationID = org
+			s.servers["s"] = server
+			if _, err := assign(s, "j", now); !errors.Is(err, domain.ErrConflict) {
+				t.Fatalf("got %v, want conflict", err)
+			}
+			if s.jobs["j"].Status != domain.JobQueued || s.jobs["j"].Assignment != nil ||
+				s.servers["s"].GPUs[0].State != domain.GPUFree || len(s.commands) != 0 {
+				t.Fatal("rejected organization changed job, GPU or command")
+			}
+		})
+	}
+}
+
+func TestHeartbeatReconnectKeepsReservationAndBlocksStartUntilInventory(t *testing.T) {
+	s, now := fixture(t)
+	queued(t, s, "j", 0, now)
+	if _, err := assign(s, "j", now); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := s.MarkStaleServers(ctx, now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	reconnected, err := s.Heartbeat(ctx, "s", now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reconnected.InventoryReceivedAt.IsZero() || reconnected.GPUs[0].State != domain.GPUReserved ||
+		s.jobs["j"].Assignment.ReservationState != "RESERVED" {
+		t.Fatal("heartbeat released reservation or restored inventory freshness")
+	}
+	commands, err := s.LeaseCommands(ctx, "s", now.Add(time.Minute), time.Minute, 10)
+	if err != nil || len(commands) != 0 {
+		t.Fatalf("START leased before fresh inventory: %v %v", commands, err)
 	}
 }
 func TestInvalidReservationDoesNotMutateGPU(t *testing.T) {

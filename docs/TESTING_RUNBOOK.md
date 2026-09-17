@@ -302,7 +302,11 @@ npm.cmd test
 npm.cmd run build
 ```
 
-Test fixtures/automation cũ dùng bearer chung hoặc ownership rỗng có thể cần chuyển sang Organization/session/enrollment trước khi full suite đạt. Các test và số liệu PASS của task trước không chứng minh phiên bản này đã chạy đạt.
+Fixture scheduler/benchmark/allocation và memory safety đã thêm ownership; regression tests HTTP identity/application login cũng đã viết nhưng chưa chạy. Các fixtures/automation khác dùng bearer chung hoặc ownership rỗng vẫn có thể cần chuyển sang Organization/session/enrollment trước khi full suite đạt. Các test và số liệu PASS của task trước không chứng minh phiên bản này đã chạy đạt.
+
+## Fixture Postman protocol tùy chọn
+
+Folder Organization - Protocol nội bộ cần CP/state/database kiểm thử riêng và account ADMIN riêng; không gửi fake inventory vào Agent đang chạy. Đặt internal_base_url khác base_url, internal_username/internal_password, enable_agent_internal=true. Folder tự login, tạo enrollment và sinh MachineID/UUID độc lập rồi thực hiện protocol cũ. Không dùng nó để chứng minh Docker/NVML execution. Repo chưa có script dựng CP/database fixture độc lập theo tenancy: **TODO: command not defined by current repository**. Dùng LEVEL 2 để kiểm thử fake Agent đầy đủ mà không cần tự gửi inventory.
 
 ## Nguồn và phạm vi
 

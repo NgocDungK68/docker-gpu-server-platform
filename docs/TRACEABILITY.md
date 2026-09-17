@@ -1,6 +1,24 @@
-# Scope traceability
+# Ánh xạ scope → implementation → kiểm thử
 
 Backend = AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane. Frontend = AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console. Path internal/cmd/api dưới đây thuộc backend; src/tests thuộc frontend.
+
+## Mentor scope — Organization/auth/onboarding
+
+Các mục này mới được kiểm tra tĩnh, **chưa chạy** test/build/migration. Kết quả PASS phía dưới thuộc lịch sử trước tenancy.
+
+| Scope | Implementation / source | Kiểm thử được bổ sung hoặc cách kiểm tra |
+|---|---|---|
+| Organization/session auth | domain/organization.go; application/identity.go; httpapi/identity.go; store/postgres | application/identity_test.go: login, enabled identity, session hash; httpapi/identity_test.go: session scope, spoofing, logout |
+| Enrollment ownership | MetadataRepository.BindEnrollment; postgres transaction; ControlPlane.RegisterAgent | application/identity_test.go: không lấy name/labels/organization từ Agent; Postman Organization - Protocol nội bộ |
+| Hard filter trước scoring | application/scheduler.go; application/allocation.go | TestOrganizationFilterPrecedesScoringForEveryStrategy; fixture benchmark cùng organization |
+| Atomic commit và stale/reconnect | memory.CommitAssignment / Heartbeat / LeaseCommands | safety_test.go: conflict ownership không mutation; heartbeat không release/resume START trước inventory |
+| PostgreSQL metadata | 001_metadata.sql; postgres.Store; cmd/aiwm-server --migrate / --bootstrap-admin | Runbook LEVEL 1; chưa có integration test PostgreSQL chạy thực tế |
+| Linux compatibility | agent/preflight.go; dockerengine.Compatibility; cmd/aiwm-agent | Runbook LEVEL 3 --check; chưa kiểm chứng máy GPU thật |
+| Frontend login/context/admin/onboarding | features/identity; app/login; organizations/onboarding; BFF | Runbook manual UI; chưa chạy browser tests, fixtures cũ chưa chuyển login |
+| API contract / Postman | api/openapi.yaml; postman collection/environment | 33 method endpoints gồm 12 auth/metadata mới; folders chính/admin/tenancy/protocol chưa chạy |
+| Canonical docs | SYSTEM_DESIGN, ALGORITHMS, DOMAIN_MODEL, TECH_STACK, CORPORATE_POLICY, API_TESTING_POSTMAN, TESTING_RUNBOOK | README trỏ canonical; IMPLEMENTATION_STATUS dùng resume |
+
+## Mapping các capability đã có
 
 | Scope | Implementation | Main files | Test / demo |
 |---|---|---|---|
@@ -15,12 +33,12 @@ Backend = AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane. Fronte
 | Frontend intent | Catalog backend, limits động, panel không K/score | job-form.tsx; allocation-preview.tsx; form-schema.ts; api-client.ts | 10 contract tests; lint/typecheck PASS |
 | Scheduler policies | Filter/score/select riêng, 4 strategy | application/scheduler.go | scheduler_test.go; scheduler_safety_test.go; cmd/aiwm-scheduler-bench |
 | Atomic reservation | Validate all UUIDs, commit job/command/resources under lock | store/memory/store.go; ports/repository.go; store/durable/store.go | memory/safety_test.go concurrent40, invalid UUID, failed launch |
-| Queue/Priority | Priority ↓ / createdAt ↑ / ID ↑; reason | store/memory/store.go; application/controlplane.go | memory/safety_test.go; acceptance D/E |
+| Queue/Priority | policy lane → Necessity → auxiliary → CreatedAt/ID; reason | store/memory/store.go; application/controlplane.go | memory/safety_test.go; acceptance D/E |
 | Managed lifecycle | Typed start/stop, exact UUID, ownership | agent/executor.go; agent/dockerengine/engine.go; store/memory/lifecycle.go | engine_test.go; integration test; acceptance C/E |
 | Command retry / idempotency | Lease + processed results + one ACK effect | agent/runner.go; agent/state; memory/lifecycle.go | runner_test.go; memory/safety_test.go |
 | Reconciliation | Inventory transaction xử lý active/exited/missing; release logical reservation khi terminal | store/memory/lifecycle.go; application/controlplane.go | memory/safety_test.go; integration test; recovery.py |
 | Persistence/restart | Snapshot v1, process lock, rollback, stale on restart | store/durable; store/memory/snapshot.go | durable/store_test.go; recovery.py |
-| Security | Separate enrollment/Agent/public tokens; whitelist BFF | httpapi/security.go; application/validation.go; src/lib/api/proxy-policy.ts | security_test.go; contracts.test.mjs; console.spec.ts |
+| Security | Session nội bộ, enrollment/Agent token riêng; whitelist BFF | httpapi/security.go; application/validation.go; src/lib/api/proxy-policy.ts | security_test.go; contracts.test.mjs; console.spec.ts |
 | Input/model contract | Strict JSON, limits, env redaction, typed UI | httpapi/job_view.go; application/validation.go; api/openapi.yaml; src/lib/api/types.ts | security_test.go; frontend contracts; live BFF acceptance |
 | Dashboard | Pool counts, capacity, actual job events | src/app/(console)/page.tsx; features/dashboard | Playwright live navigation, summary API |
 | Server list/detail | Table, hardware, readiness, GPUs/containers/drain | src/app/(console)/servers | Playwright browser inventory |
@@ -29,7 +47,7 @@ Backend = AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane. Fronte
 | Simulation | NVIDIA mock library; shared core; persisted Docker runtime | Dockerfile.sim; internal/simulator; deploy/simulation | Compose2 hosts, 4 NVML profiles |
 | Configuration | Typed backend/Agent, Next server/client config | internal/config; agent/config; simulator/config; src/config | Startup validation; README and CONFIGURATION |
 | Domain model / states | Entities thực tế, bốn state machines, GPU semantics, ownership và test gaps | docs/DOMAIN_MODEL.md; internal/domain/model.go; store/memory | Source/enum/link audit; tests cụ thể trong Domain Model |
-| API audit / Postman | 21 backend endpoints, auth, prerequisites, API → scope → source | docs/API_TESTING_POSTMAN.md; postman; internal/httpapi/server.go | Task allocation: Newman 25 requests/51 assertions PASS; 195 assertions là kiểm chứng trước contract intent |
+| API audit / Postman | 33 method endpoints, session auth, prerequisites, API → scope → source | docs/API_TESTING_POSTMAN.md; postman; internal/httpapi/server.go | Task allocation: Newman 25 requests/51 assertions PASS; 195 assertions là kiểm chứng trước contract intent |
 | Architecture/docs | VN README root, API/security/config/scope mapping | README.md; docs; backend/api/openapi.yaml | Link/spec validation and final build |
 
 Nguồn chính xác cho các file adapter có thể xem bằng rg --files internal/agent; bảng trỏ cả package khi trách nhiệm nằm ở nhiều file.
@@ -38,13 +56,13 @@ Nguồn chính xác cho các file adapter có thể xem bằng rg --files intern
 
 [DOMAIN_MODEL.md](DOMAIN_MODEL.md) bổ sung mapping entity/state → implementation → test, gồm guards và các nhánh chưa có test riêng. AgentID chính là Server.ID; Workload trên UI dùng Job; reservation là Job.Assignment. Release là kết thúc logical reservation, không mặc định GPU FREE. Các tests trong bảng không chứng minh mọi interleaving start/stop; nhánh STOPPING + missing khi Start còn DELIVERED được ghi rõ là giới hạn của code hiện tại.
 
-Runbook và collection: [API testing bằng Postman](API_TESTING_POSTMAN.md). Bảng endpoint phân biệt 16 public (gồm probes) và 5 Agent/internal; không có login/refresh API. Test protocol manual không chứng minh Docker/NVML discovery hoặc CUDA execution.
+Runbook và collection: [API testing bằng Postman](API_TESTING_POSTMAN.md). Hiện có 28 public method endpoints (gồm probes, login/logout/me và metadata) và 5 Agent/internal; không có refresh-token API. Test protocol manual không chứng minh Docker/NVML discovery hoặc CUDA execution.
 
-## Kiểm chứng môi trường
+## Kiểm chứng môi trường trước task tenancy
 
 Đã chạy trên Windows host + Docker Desktop Linux: Go fmt/vet/test/build, Linux go test -race ./..., bốn NVIDIA mock profiles, Next lint/typecheck/unit tests/production build, acceptance A–H với CP thật và Next BFF, browser test với Edge.
 
-Chưa chạy trên máy có GPU NVIDIA thật; không đánh dấu CUDA execution hoặc real-GPU runtime survival là đã chứng minh. SQL target migration không được apply vì chưa có PostgreSQL adapter.
+Chưa chạy trên máy có GPU NVIDIA thật; không đánh dấu CUDA execution hoặc real-GPU runtime survival là đã chứng minh. Ở lần kiểm chứng lịch sử đó chưa có PostgreSQL adapter. Task mới đã thêm adapter metadata, nhưng chưa chạy migration/DB integration.
 
 ## Kiểm chứng task Policy-driven Allocation
 

@@ -31,6 +31,8 @@ PostgreSQL chứa organizations/users/sessions/server_enrollments/server_ownersh
 **Failure:** Agent restart verify MachineID, giữ sequence/processed results, re-register và gửi FULL inventory. Heartbeat sau OFFLINE/khoảng mất heartbeat vô hiệu inventory freshness; chỉ inventory hợp lệ mới mở lại scheduling và lease START. Mất Agent/CP/network không giải phóng GPU hoặc stop container. Heartbeat chỉ cho biết thiếu liên lạc, không xác định chính xác host chết hay network partition.
 
 
+Kiểm thử boundary mới (đã viết, chưa chạy): backend application/identity_test.go, httpapi/identity_test.go, TestOrganizationFilterPrecedesScoringForEveryStrategy và memory/safety_test.go. Chúng kiểm tra ownership server-side, session scope/spoofing/logout, org filter trước scorer, commit conflict không mutation và reconnect chưa có FULL inventory. PostgreSQL transaction/bind concurrency vẫn cần kiểm chứng trên DB thật.
+
 ## 1. Domain entities và các representation thực sự tồn tại
 
 ### 1.1 Server
@@ -550,7 +552,7 @@ Invariants allocation bổ sung:
 
 ## 9. Consistency audit và giới hạn hiện tại
 
-Đã đối chiếu [README](../README.md), [ARCHITECTURE](ARCHITECTURE.md), [TRACEABILITY](TRACEABILITY.md), backend README, Agent protocol, OpenAPI, frontend types và các source/test được dẫn ở trên. Các state chính Server/GPU/Job/Command khớp tên khai báo; những khác biệt đáng chú ý:
+Đã đối chiếu [README](../README.md), [SYSTEM_DESIGN](SYSTEM_DESIGN.md), [TRACEABILITY](TRACEABILITY.md), backend README, Agent protocol, OpenAPI, frontend types và các source/test được dẫn ở trên. Các state chính Server/GPU/Job/Command khớp tên khai báo; những khác biệt đáng chú ý:
 
 | Phát hiện từ source | Hệ quả cần hiểu / mức kiểm chứng |
 |---|---|

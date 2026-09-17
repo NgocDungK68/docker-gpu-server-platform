@@ -37,7 +37,7 @@ services:
       AIWM_MAX_TTL_SECONDS: ${AIWM_MAX_TTL_SECONDS:-2592000}
       AIWM_CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     ports:
-      - "127.0.0.1:8080:8080"
+      - "${AIWM_CP_BIND_HOST:-127.0.0.1}:8080:8080"
     volumes:
       - control-plane-data:/data
   agent-a100:
@@ -85,7 +85,7 @@ services:
       AIWM_API_BASE_URL: http://control-plane:8080
       AIWM_SESSION_COOKIE_SECURE: ${AIWM_SESSION_COOKIE_SECURE:-false}
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${AIWM_CONSOLE_BIND_HOST:-127.0.0.1}:3000:3000"
 volumes:
   metadata-data:
   control-plane-data:

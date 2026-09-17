@@ -86,8 +86,7 @@ Trong simulation, `simulator.Runtime` thay Docker boundary và mock library thay
 |---|---|
 | PostgreSQL / lib/pq | Lưu metadata tổ chức, người dùng, session và onboarding. |
 | Go | Implement Control Plane và Agent backend. |
-| Next.js / React / TypeScript | Xây dựng Console và BFF cho public API. |
-| Node.js | Chạy Next.js server. |
+| Next.js / React / TypeScript / Node.js | Xây dựng Console và chạy BFF cho public API. |
 | Tailwind CSS | Tạo styling cho Console. |
 | TanStack Query | Quản lý dữ liệu API, cache và refresh phía UI. |
 | React Hook Form / Zod | Quản lý form và validate input. |
@@ -109,6 +108,7 @@ Trong simulation, `simulator.Runtime` thay Docker boundary và mock library thay
 | HTTP/JSON | Khớp mô hình Agent outbound polling và các public endpoints đang được implement. |
 | Docker Engine API / Moby SDK | Cho Agent thao tác trực tiếp local Docker trên standalone GPU server. |
 | NVML / go-nvml | Cho Agent lấy telemetry GPU local bằng cùng Go adapter trên driver thật hoặc mock. |
+| PostgreSQL / lib/pq | Lưu account/organization/enrollment với ràng buộc unique, FK và transaction, độc lập runtime snapshot. |
 | Gob/JSON files | Giữ CP và Agent state qua process restart theo mô hình local persistence hiện tại. |
 | Mock NVML / Compose | Cho demo luồng inventory/control với NVIDIA shared-library mock mà không cần GPU vật lý. |
 
@@ -118,6 +118,7 @@ Paths `internal/` và `cmd/` dưới đây thuộc backend; `src/` thuộc front
 
 | Technology | Main integration file/package |
 |---|---|
+| PostgreSQL / database/sql / lib/pq | [internal/store/postgres/store.go](../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/store/postgres/store.go); 001_metadata.sql; cmd/aiwm-server/main.go |
 | Go / server composition | [go.mod][gomod]; [cmd/aiwm-server/main.go][server-main]; [cmd/aiwm-agent/main.go][agent-main] |
 | Next.js / React / Node.js / TypeScript | [package.json][package]; [src/app/layout.tsx][layout]; [frontend Dockerfile][fe-docker] |
 | BFF / Fetch | [src/app/api/aiwm/[...path]/route.ts][bff]; [src/lib/api/api-client.ts][api-client] |

@@ -84,6 +84,9 @@ func (s *Server) ready(writer http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) summary(writer http.ResponseWriter, request *http.Request) {
 	result, err := s.controlPlane.Summary(request.Context())
+	for i := range result.RecentEvents {
+		result.RecentEvents[i].Reason = publicReason(result.RecentEvents[i].Reason)
+	}
 	respond(writer, result, err, http.StatusOK)
 }
 

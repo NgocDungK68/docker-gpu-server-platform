@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -21,10 +23,17 @@ import (
 const agentVersion = "0.2.0"
 
 func main() {
+	showVersion := flag.Bool("version", false, "print Agent version and platform, then exit")
 	checkOnly := flag.Bool("check", false, "verify Docker Engine and NVML access, print inventory, then exit")
 	flag.Parse()
-	loadConfig:=agentconfig.Load
-	if *checkOnly { loadConfig=agentconfig.LoadForCheck }
+	if *showVersion {
+		fmt.Printf("aiwm-agent %s (%s/%s)\n", agentVersion, runtime.GOOS, runtime.GOARCH)
+		return
+	}
+	loadConfig := agentconfig.Load
+	if *checkOnly {
+		loadConfig = agentconfig.LoadForCheck
+	}
 	configuration, err := loadConfig()
 	if err != nil {
 		slog.Error("load agent configuration", "error", err)
@@ -39,17 +48,21 @@ func main() {
 	}
 	defer docker.Close()
 	gpuReader, nvmlError := gpu.New()
-	if nvmlError==nil { defer gpuReader.Close() }
-	checkCtx,cancelCheck:=context.WithTimeout(context.Background(),configuration.RequestTimeout)
-	compatibility:=agent.Preflight(checkCtx,docker,gpuReader,nvmlError)
+	if nvmlError == nil {
+		defer gpuReader.Close()
+	}
+	checkCtx, cancelCheck := context.WithTimeout(context.Background(), configuration.RequestTimeout)
+	compatibility := agent.Preflight(checkCtx, docker, gpuReader, nvmlError)
 	cancelCheck()
-	if *checkOnly || compatibility.Status!=agent.PlatformSupported {
+	if *checkOnly || compatibility.Status != agent.PlatformSupported {
 		_ = json.NewEncoder(os.Stdout).Encode(compatibility)
-		if compatibility.Status!=agent.PlatformSupported { os.Exit(1) }
+		if compatibility.Status != agent.PlatformSupported {
+			os.Exit(1)
+		}
 	}
 	collector := agent.NewInventoryCollector(docker, gpuReader, agent.ProcCgroupResolver{}, configuration.InventoryPolicy)
 	if *checkOnly {
-		ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		if err := docker.Ping(ctx); err != nil {
 			logger.Error("Docker Engine preflight failed", "error", err)
