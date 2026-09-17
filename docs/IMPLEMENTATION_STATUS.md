@@ -1,3 +1,73 @@
+# Current Task
+
+Đơn giản hóa AIWM theo thứ tự: fake demo → real Agent release → organization đơn giản → UI tiếng Việt → docs.
+
+## Last Working Checkpoint
+
+FAKE_DEMO_STATUS = WORKING (17/09/2026, Docker Desktop + Windows + Ubuntu WSL2).
+Checkpoint Phase A: `wip: working multi-server fake GPU demo`; nền trước đó `fffd420`.
+REAL_RELEASE_STATUS = PARTIAL — production Agent/preflight có sẵn; chưa có release builder/installer đơn giản.
+
+## DONE
+
+- Sửa xung đột port: native PostgreSQL Windows giữ 5432, demo dùng 15432; synchronize env local, không xóa dữ liệu.
+- Một lệnh up/down; 4 organizations, 5 demo accounts, 6 Agent Sim, 26 GPUs. Scenario configurable; token enrollment riêng từng server, lưu local.
+- Cùng Runner/InventoryCollector/GPU reader và NVIDIA mock NVML; chỉ Docker runtime là simulator.
+- Kiểm chứng backend/BFF/browser và failure/reconnect; external không bị stop; GPU được reserve/release qua state thật.
+- Policy/công thức/placement không thay đổi. OrganizationId hard filter có sẵn được giữ và kiểm chứng; không rewrite model.
+- Không đụng PostgreSQL Windows, Docker resource ngoài project hoặc xóa volume.
+
+## PARTIAL
+
+- Real GPU E2E chưa chạy: laptop không có GPU NVIDIA dành cho kiểm thử.
+- REAL DEPLOYMENT cần generic binary build tập trung + default URL/override + installer/systemd, không cần source/Go trên GPU host.
+- Core dùng organizationId bất biến; organizationCode là metadata/seed và hiển thị. Chưa đổi schema sang code; ADMIN submit hiện theo home organization.
+- UI chạy được nhưng chưa hoàn tất giản lược/Việt hóa toàn bộ thuật ngữ và bỏ developer notes.
+- Các docs/fixtures lịch sử không chứng nhận flow mới; mục fake mới trong runbook là authoritative.
+
+## TODO
+
+- Phase B: build-agent-release, install-agent-linux, hướng dẫn Control Plane network URL/enrollment riêng/release distribution và real E2E.
+- Sau B: cân nhắc tối thiểu nhu cầu orgCode/admin submit; UI Việt hóa; diagrams/docs canonical tương ứng.
+- Chỉ sửa phần cần thiết, không migrate/rewrite runtime store.
+
+## Commands Verified
+
+- `python scripts/configure.py --postgres-port 15432`; Compose postgres healthy.
+- Build Compose control-plane, agent-a100 (image dùng chung), console.
+- `python scripts/demo.py up --skip-build --set-demo-passwords` (chuyển account lab cũ một lần).
+- `wsl -d Ubuntu --cd /mnt/f/Viettel/VDT/demo-project -- bash scripts/demo-up.sh --skip-build`.
+- `wsl -d Ubuntu --cd /mnt/f/Viettel/VDT/demo-project -- python3 scripts/demo.py check`: PASS.
+- `python scripts/demo.py check`: PASS 7 nhóm.
+- `python scripts/demo.py check --base-url http://127.0.0.1:3000/api/aiwm`: PASS 7 nhóm.
+- `python scripts/demo.py failure`: PASS RESERVED, OFFLINE giữ allocation, Agent/CP restart.
+- Frontend `npm.cmd run typecheck`: PASS; Edge `npm.cmd run test:e2e -- tests/e2e/demo.spec.ts`: 2 PASS.
+- Backend `go test ./internal/application ./internal/httpapi ./internal/store/memory`: PASS.
+- Không chạy benchmark/stress/global cleanup.
+
+## Demo URLs
+
+Console http://127.0.0.1:3000/login; CP http://127.0.0.1:8080; health /healthz; PostgreSQL localhost:15432.
+
+## Demo Accounts
+
+admin/vtt/vds/vtnet/vtit — password mẫu công khai `AIWM-Demo-2026!`.
+Xem [DEMO_ACCOUNTS.md](DEMO_ACCOUNTS.md). Không dùng cho production.
+
+## Files Changed
+
+Phase A: compose.yaml; scripts/configure.py, acceptance.py (SessionAPI), demo.py, demo-up.sh, demo-down.sh; config/demo-users.json; demo/scenarios/multi-server.json; backend go.mod/go.sum và memory/store_test.go; frontend tests/e2e/demo.spec.ts; docs/DEMO_ACCOUNTS.md, TESTING_RUNBOOK.md, IMPLEMENTATION_STATUS.md; README.md.
+Giữ nguyên thay đổi có sẵn từ phiên resume trước; checkpoint chỉ stage phần của Phase A.
+
+## NEXT STEP
+
+NEXT STEP = real GPU server support / central Agent release.
+Đọc trực tiếp `internal/agent/config/config.go`, `cmd/aiwm-agent/main.go`, `deploy/agent/aiwm-agent.service` trong backend, rồi thêm `scripts/build-agent-release.sh`, `scripts/install-agent-linux.sh`. URL: env override > build default > localhost. Không sửa lại fake demo đã PASS.
+
+---
+
+## Lịch sử trước Phase A
+
 # Trạng thái implementation
 
 ## Task hiện tại: Organization boundary + auth + onboarding (2026-09-17)

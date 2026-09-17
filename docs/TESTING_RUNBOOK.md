@@ -1,5 +1,101 @@
 # Runbook kiểm thử AIWM
 
+## FAKE multi-server — đường chạy đã kiểm chứng (17/09/2026)
+
+Dùng mục này cho demo hiện tại; các bước thủ công phía dưới chỉ để đối chiếu/development. Phase A đã chạy thật trên Windows + Docker Desktop và Ubuntu WSL2.
+
+### Khởi động tại workspace root
+
+PowerShell:
+
+~~~powershell
+python scripts/demo.py up
+~~~
+
+WSL (Docker Desktop bật integration cho Ubuntu, có Python 3):
+
+~~~bash
+cd /mnt/f/Viettel/VDT/demo-project
+bash scripts/demo-up.sh
+~~~
+
+Lần đầu script build tuần tự Control Plane, Agent Sim và Console; migrate metadata, seed demo accounts, tạo enrollment riêng từng server rồi khởi động sáu Agent. Lần sau khi source không đổi dùng `--skip-build`. Không cần Go/Node trên máy chỉ chạy Compose demo.
+
+Mở **http://127.0.0.1:3000/login**. Các user `admin`, `vtt`, `vds`, `vtnet`, `vtit` dùng password demo `AIWM-Demo-2026!`; xem [DEMO_ACCOUNTS.md](DEMO_ACCOUNTS.md). Chỉ dùng trên lab, không production. Nếu account cũ khác mật khẩu, script dừng; chỉ dùng `--set-demo-passwords` khi chủ động đổi các account demo có cùng role/ownership. Không xóa database để làm lại demo.
+
+### Lỗi bind PostgreSQL 5432 trên máy Windows này
+
+Đã xác định port 5432 có PostgreSQL Windows đang lắng nghe. Giữ nguyên service đó; Compose demo dùng **127.0.0.1:15432 → postgres:5432**. Script up tự đồng bộ host port trong root/backend env. Muốn chỉ sửa cấu hình local:
+
+~~~powershell
+python scripts/configure.py --postgres-port 15432
+docker compose -p aiwm-org-demo up -d --wait postgres
+~~~
+
+Nếu 15432 cũng bận, chọn port trống khác bằng `python scripts/demo.py up --postgres-port 25432`. Không tắt dịch vụ lạ hoặc sửa Windows reserved ports. Native backend kết nối localhost:15432; container CP vẫn dùng postgres:5432. Không in DSN chứa password để debug.
+
+### Dữ liệu và luồng demo
+
+Nguồn: `config/demo-users.json` và `demo/scenarios/multi-server.json`; organization chỉ là metadata.
+
+| Organization | Server | GPU |
+|---|---|---|
+| VTT | vtt-gpu-01; vtt-gpu-02 | 4 H100 80GB; 8 A100 80GB |
+| VDS | vds-gpu-01; vds-gpu-02 | 4 H100 80GB; 4 A100 80GB |
+| VTNET | vtnet-gpu-01 | 4 H100 80GB |
+| VTIT | vtit-gpu-01 | 2 A100 80GB |
+
+Tổng **6 servers, 26 GPUs**. Dùng model đã có trong capability catalog, chưa thêm H200/L40S. Mock NVML tạo process external/unknown và lỗi ECC; SAME Runner + InventoryCollector phân loại LEGACY/UNKNOWN/UNHEALTHY. RESERVED xuất hiện khi scheduler commit trước Agent thực thi; ALLOCATED khi workload chạy. Đây không phải state gán giả trong frontend.
+
+Login vtt → Tạo workload: image `alpine:3.21`, command mỗi dòng một đối số `sh`, `-c`, `sleep 300`; TRAINING, 1 GPU, VRAM 1024 MiB, profile general, Cần thiết 2, lý do go-live, mức Quan trọng, điền thời điểm cần. Đối chiếu → Gửi → RUNNING trên VTT → Stop → reservation RELEASED → GPU FREE nếu không còn blocker. Lặp với vds: chỉ thấy/nhận tài nguyên VDS.
+
+Simulation không chạy CUDA/image thật: simulator.Runtime mô phỏng Docker lifecycle, cùng Agent core quan sát mock NVML. GPU utilization mock không đại diện benchmark. Quy tắc placement/policy/reservation/auth đều chạy qua Control Plane thật.
+
+### Kiểm thử có thể chạy lại
+
+Từ workspace root (WSL thay `python` bằng `python3`):
+
+~~~powershell
+python scripts/demo.py check
+python scripts/demo.py check --base-url http://127.0.0.1:3000/api/aiwm
+python scripts/demo.py failure
+~~~
+
+`failure` tạm pause/stop đúng Agent VTIT và Control Plane của project demo, rồi phục hồi; không chạy đồng thời khi đang thuyết trình. Fake runtime state được persist trong volume; phép thử này không chứng minh process CUDA thật sống sót.
+
+Browser smoke trên Windows có Edge và frontend dependencies đã cài:
+
+~~~powershell
+cd AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console
+$env:AIWM_BROWSER_CHANNEL = "msedge"
+npm.cmd run test:e2e -- tests/e2e/demo.spec.ts
+~~~
+
+| Kiểm tra thực tế | Kết quả |
+|---|---|
+| CP API và BFF: ADMIN thấy toàn bộ; bốn user scope đúng organization | PASS |
+| Submit → reservation → command → Agent Sim → RUNNING; stop → RELEASED/FREE | PASS |
+| Request quá lớn QUEUED; không mượn GPU đơn vị khác | PASS |
+| LEGACY/UNKNOWN/UNHEALTHY không được cấp phát; external giữ identity/start time | PASS |
+| RESERVED trước execution; OFFLINE giữ allocation; Agent/CP restart phục hồi | PASS |
+| Edge: các màn admin; VTT tạo workload qua form và release | PASS — 2 tests |
+| Go application/httpapi/memory; frontend typecheck; Compose images | PASS |
+
+Kết quả JSON local ở `.cache/multi-server-demo/`; không commit enrollment/session. Test chỉ stop/cancel Job do chính test tạo. Các script acceptance/recovery/doctor lịch sử không phải entrypoint chứng nhận demo mới.
+
+### Dừng demo
+
+~~~powershell
+python scripts/demo.py down
+~~~
+
+WSL: `bash scripts/demo-down.sh`. Chỉ project `aiwm-org-demo`, giữ named volumes/metadata/Agent identity. Không `down -v`, không global prune. Bật lại bằng up --skip-build. Khi đổi qua lại PowerShell/WSL, Compose có thể recreate Agent vì cách biểu diễn bind path khác; volume giữ nguyên.
+
+### Ranh giới với REAL DEPLOYMENT
+
+GPU server production sẽ nhận generic Agent release + installer + enrollment riêng, không clone repo và không cần Go compiler. Release builder/installer đang là bước kế tiếp của Phase B. Phần LEVEL 3 build từ source phía dưới chỉ là DEVELOPMENT/TROUBLESHOOTING, chưa phải quy trình production đã kiểm chứng. Chưa có GPU NVIDIA vật lý để chứng nhận real E2E.
+
+---
 Tài liệu dành cho người chạy thủ công. **Task implementation này không chạy build, test, migration, Docker, npm hoặc network.** Các lệnh dưới đây dựa trên entrypoint, Compose, Makefile, script và routes hiện có; kết quả mong đợi chưa phải kết quả đã kiểm chứng.
 
 ## Chuẩn bị chung và bảo toàn dữ liệu

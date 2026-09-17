@@ -1,5 +1,13 @@
 # AIWM — Docker GPU Agent & Scheduler
 
+## Demo hiện tại — 6 server, 26 GPU
+
+Tại workspace root: **`python scripts/demo.py up`** (PowerShell) hoặc **`bash scripts/demo-up.sh`** (WSL). Image đã build và source không đổi thì thêm `--skip-build`.
+
+Mở **http://127.0.0.1:3000/login**. User: `admin`, `vtt`, `vds`, `vtnet`, `vtit`; password demo: `AIWM-Demo-2026!`. **Chỉ development/demo, không production.** PostgreSQL demo dùng port **15432**, giữ nguyên PostgreSQL Windows tại 5432.
+
+Kiểm tra: `python scripts/demo.py check`; dừng và giữ dữ liệu: `python scripts/demo.py down`. Xem [TESTING_RUNBOOK](docs/TESTING_RUNBOOK.md) cho lệnh chi tiết, failure tests và trạng thái real deployment; [DEMO_ACCOUNTS](docs/DEMO_ACCOUNTS.md) cho tài khoản. Đây là đường chạy được kiểm chứng thay cho các bước demo thủ công lịch sử bên dưới.
+
 AIWM gom các Docker GPU server độc lập thành một **logical GPU resource pool**. Agent quan sát Docker/NVML, Control Plane nhận job và cấp phát nguyên GPU vật lý, Console hiển thị inventory và vòng đời job.
 
 Điểm cốt lõi là **đưa server đang có workload vào hệ thống mà không dừng workload đó**. Container External chỉ được quan sát; AIWM không tự stop/restart/delete/adopt. Mất Agent hoặc Control Plane không phải lý do dừng container. Không triển khai Kubernetes, MIG, GPU sharing, time-slicing, checkpoint hay preemption.
@@ -126,6 +134,7 @@ Queue theo policy lane → Necessity → auxiliary priority → CreatedAt/ID; us
 | [ALGORITHMS.md](docs/ALGORITHMS.md) | Policy, priority, queue, GPU filtering, placement scoring và reservation rules từ backend source. |
 | [DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) | Domain entities, states, relationships và invariants. |
 | [API_TESTING_POSTMAN.md](docs/API_TESTING_POSTMAN.md) | API audit, Postman flows và hướng dẫn kiểm thử backend. |
+| [DEMO_ACCOUNTS.md](docs/DEMO_ACCOUNTS.md) | User/password mẫu và đơn vị để đăng nhập demo. |
 | [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | Trạng thái implementation hiện tại. |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Các quyết định kiến trúc và component boundaries. |
 | [SCHEDULER.md](docs/SCHEDULER.md) | Bản tóm tắt scheduler và queue. |
