@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,9 +16,13 @@ import (
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/httpapi"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/policy"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/store/durable"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/store/postgres"
 )
 
 func main() {
+	migrate := flag.Bool("migrate",false,"Tạo schema business metadata rồi thoát")
+	bootstrap := flag.Bool("bootstrap-admin",false,"Tạo organization/admin đầu tiên từ AIWM_BOOTSTRAP_* rồi thoát")
+	flag.Parse()
 	configuration, err := config.Load()
 	if err != nil {
 		slog.Error("load configuration", "error", err)
@@ -25,6 +30,22 @@ func main() {
 	}
 	logger := newLogger(configuration.LogLevel)
 	slog.SetDefault(logger)
+	dbCtx,dbCancel := context.WithTimeout(context.Background(),30*time.Second)
+	defer dbCancel()
+	metadata,err := postgres.Open(dbCtx,configuration.DatabaseURL)
+	if err != nil { logger.Error("Không kết nối được PostgreSQL metadata; kiểm tra AIWM_DATABASE_URL"); os.Exit(1) }
+	defer metadata.Close()
+	identity := application.NewIdentity(metadata)
+	if *migrate {
+		if err:=metadata.Migrate(dbCtx); err!=nil { logger.Error("Migration metadata thất bại", "error",err); os.Exit(1) }
+		return
+	}
+	if *bootstrap {
+		if err:=identity.Bootstrap(dbCtx,configuration.BootstrapOrganizationCode,configuration.BootstrapOrganizationName,configuration.BootstrapUsername,configuration.BootstrapPassword); err!=nil {
+			logger.Error("Bootstrap admin thất bại", "error",err); os.Exit(1)
+		}
+		return
+	}
 
 	repository, err := durable.Open(configuration.StateFile, configuration.OfflineAfter)
 	if err != nil {
@@ -33,13 +54,14 @@ func main() {
 	}
 	defer repository.Close()
 	controlPlane := application.New(repository, application.Options{
+		Metadata: metadata,
 		EnrollmentToken: configuration.EnrollmentToken, HeartbeatInterval: configuration.HeartbeatInterval,
 		OfflineAfter: configuration.OfflineAfter, CommandLease: configuration.CommandLease,
 		DefaultStrategy: configuration.SchedulerStrategy,
 		Policy:          policy.New(policy.DevelopmentFacts{InSizingPlan: configuration.DevelopmentInSizingPlan, QuotaGPUs: configuration.DevelopmentQuotaGPUs, UsedGPUs: configuration.DevelopmentUsedGPUs}),
 		RequestLimits:   application.RequestLimits{MaxGPUCount: configuration.MaxGPUCount, MaxTTLSeconds: configuration.MaxTTLSeconds},
 	})
-	api := httpapi.New(controlPlane, logger, configuration.CORSOrigins, httpapi.Options{PublicAPIToken: configuration.PublicAPIToken})
+	api := httpapi.New(controlPlane, logger, configuration.CORSOrigins, httpapi.Options{Identity: identity})
 	server := &http.Server{
 		Addr:              configuration.HTTPAddr,
 		Handler:           api.Handler(),

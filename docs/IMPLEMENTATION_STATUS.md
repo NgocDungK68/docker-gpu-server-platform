@@ -1,5 +1,33 @@
 # Trạng thái implementation
 
+## Task hiện tại: Organization boundary + auth + onboarding (2026-09-17)
+
+DONE:
+- Lát cắt 1: domain Organization/User/Principal, PostgreSQL metadata schema/adapter, PBKDF2 password hash, session 8 giờ, login/me/logout, ADMIN quản lý organization/user; CLI migrate/bootstrap đã nối trong aiwm-server.
+- Lát cắt 2: enrollment bind organization/machine server-side; ownership bất biến, scope API tại application; Job lấy organization từ Principal; hard filter ở preview/scheduler và kiểm tra lại trong CommitAssignment.
+- Lát cắt 3: production preflight báo SUPPORTED/DEGRADED/UNSUPPORTED, đọc OS/architecture/kernel/cgroup, Docker version/API/runtime nvidia, NVML/GPU discovery; không chạy shell probe hoặc test container. Startup/reconnect cần FULL inventory; heartbeat quay lại chưa đủ để lease START. Retry startup/heartbeat/command có backoff+jitter; inventory định kỳ giữ nhịp cũ.
+- Lát cắt 4: login nội bộ, BFF cookie HttpOnly/session, current organization/user/role; ADMIN có bộ lọc đơn vị và CRUD metadata tối thiểu; onboarding cấp token, không nhập GPU; query tài nguyên dùng organization filter do backend authorize.
+- Compose/configure: PostgreSQL service, credentials sinh local, migrate/bootstrap tường minh và token riêng từng Agent Sim. Không chạy script hoặc Compose trong task.
+
+PARTIAL:
+- Tất cả thay đổi mới chỉ được đọc/sửa tĩnh, chưa chạy migration/build/test theo yêu cầu.
+- Dependency lib/pq đã khai báo; chưa tải dependency hoặc cập nhật go.sum qua Go tool.
+- Dữ liệu runtime cũ thiếu organization được giữ nguyên và không được schedule; không tự chuyển ownership.
+
+TODO:
+- Docs canonical, OpenAPI/Postman, TESTING_RUNBOOK, kiểm tra tĩnh thay đổi.
+
+FILES CHANGED:
+- Backend: domain/{organization,model,errors}; ports/metadata; store/postgres/{store,001_metadata.sql}; application/{identity,tenancy,controlplane,allocation,scheduler}; store/memory/store; httpapi/{identity,server,job_view}; config/config; cmd/aiwm-server/main; go.mod.
+- docs/IMPLEMENTATION_STATUS.md.
+- Pre-existing: README.md modified; docs/ALGORITHMS.md và docs/TECH_STACK.md untracked. Không reset/revert.
+
+NEXT STEP: docs/Postman/runbook và kiểm tra tĩnh. Các kết quả test bên dưới thuộc task cũ, không chứng nhận task hiện tại.
+
+---
+
+## Lịch sử task trước
+
 CURRENT TASK: Policy-driven GPU Allocation + Automatic Placement
 
 CURRENT MILESTONE: COMPLETE — implementation và focused verification hoàn tất

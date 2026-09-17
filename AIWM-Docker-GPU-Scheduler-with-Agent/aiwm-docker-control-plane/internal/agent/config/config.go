@@ -31,6 +31,12 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	return load(false)
+}
+
+func LoadForCheck() (Config,error) { return load(true) }
+
+func load(checkOnly bool) (Config,error) {
 	if err := loadDotEnv(".env.agent"); err != nil {
 		return Config{}, fmt.Errorf("load .env.agent: %w", err)
 	}
@@ -65,7 +71,7 @@ func Load() (Config, error) {
 	if configuration.RequestTimeout, err = duration("AIWM_AGENT_REQUEST_TIMEOUT", 30*time.Second); err != nil {
 		return Config{}, err
 	}
-	if configuration.MachineID == "" || configuration.Name == "" || configuration.EnrollmentToken == "" {
+	if configuration.MachineID == "" || configuration.Name == "" || (!checkOnly && configuration.EnrollmentToken == "") {
 		return Config{}, fmt.Errorf("agent machine ID, name and enrollment token must not be empty")
 	}
 	if configuration.HeartbeatEvery <= 0 || configuration.InventoryEvery <= 0 || configuration.CommandPollEvery <= 0 {

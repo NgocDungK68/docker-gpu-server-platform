@@ -79,6 +79,7 @@ const (
 )
 
 type Server struct {
+	OrganizationID      string            `json:"organizationId"`
 	SchedulingReady     bool              `json:"schedulable"`
 	SchedulingReason    string            `json:"schedulingReason"`
 	Host                HostInfo          `json:"host"`
@@ -165,6 +166,7 @@ type GPUProcess struct {
 }
 
 type Job struct {
+	OrganizationID string `json:"organizationId"`
 	AllocationIntent
 	Policy         PolicyDecision     `json:"policy"`
 	ID             string             `json:"id"`
@@ -235,6 +237,10 @@ type Placement struct {
 }
 
 type ClusterSummary struct {
+	ServersOffline int `json:"serversOffline"`
+	GPUsReserved int `json:"gpusReserved"`
+	GPUsAllocated int `json:"gpusAllocated"`
+	GPUsUnhealthy int `json:"gpusUnhealthy"`
 	ServersTotal  int        `json:"serversTotal"`
 	ServersOnline int        `json:"serversOnline"`
 	GPUsTotal     int        `json:"gpusTotal"`

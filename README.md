@@ -118,9 +118,26 @@ Submit tạo job QUEUED. Scheduler lọc → chấm điểm → chọn; reposito
 
 Queue theo policy lane → Necessity → auxiliary priority → CreatedAt/ID; user không chọn priority/strategy/server. Job thiếu tài nguyên vẫn chờ với lý do. Offline giữ last-known inventory và reservation; không tự reschedule workload đang chạy sang host khác.
 
-Xem [Domain Model: entities, relationships, states và invariants](docs/DOMAIN_MODEL.md), [kiến trúc chi tiết](docs/ARCHITECTURE.md), [scheduler](docs/SCHEDULER.md) và [scope → source → test](docs/TRACEABILITY.md).
+## Documentation
 
-[System Design: diagram luồng xử lý, source mapping và design observations](docs/SYSTEM_DESIGN.md).
+| Document | Purpose |
+|---|---|
+| [SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md) | Kiến trúc tổng thể, interactions, runtime flows và design observations. |
+| [ALGORITHMS.md](docs/ALGORITHMS.md) | Policy, priority, queue, GPU filtering, placement scoring và reservation rules từ backend source. |
+| [DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) | Domain entities, states, relationships và invariants. |
+| [API_TESTING_POSTMAN.md](docs/API_TESTING_POSTMAN.md) | API audit, Postman flows và hướng dẫn kiểm thử backend. |
+| [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | Trạng thái implementation hiện tại. |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Các quyết định kiến trúc và component boundaries. |
+| [SCHEDULER.md](docs/SCHEDULER.md) | Bản tóm tắt scheduler và queue. |
+| [TRACEABILITY.md](docs/TRACEABILITY.md) | Mapping scope → implementation → test/demo. |
+| [CONFIGURATION.md](docs/CONFIGURATION.md) | Tham chiếu cấu hình. |
+| [SECURITY.md](docs/SECURITY.md) | Kiến trúc bảo mật và trust boundaries. |
+| [SIMULATION.md](docs/SIMULATION.md) | NVIDIA NVML simulation cho môi trường demo. |
+| [WINDOWS-WSL.md](docs/WINDOWS-WSL.md) | Hướng dẫn test trên laptop Windows và WSL. |
+| [DEFINITION-OF-DONE.md](docs/DEFINITION-OF-DONE.md) | Tiêu chí hoàn thành và audit tiếp nối. |
+| [VALIDATION.md](docs/VALIDATION.md) | Kết quả validation thực tế đã ghi nhận. |
+| [IMPLEMENTATION-REPORT.md](docs/IMPLEMENTATION-REPORT.md) | Báo cáo implementation. |
+| [ARCHITECTURE-AUDIT.md](docs/ARCHITECTURE-AUDIT.md) | Bản audit kiến trúc và implementation plan. |
 
 ## Policy-driven GPU Allocation
 

@@ -12,6 +12,11 @@ import (
 )
 
 type Config struct {
+	DatabaseURL string
+	BootstrapOrganizationCode string
+	BootstrapOrganizationName string
+	BootstrapUsername string
+	BootstrapPassword string
 	DevelopmentInSizingPlan bool
 	DevelopmentQuotaGPUs    int
 	DevelopmentUsedGPUs     int
@@ -38,6 +43,11 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("load .env: %w", err)
 	}
 	config := Config{
+		DatabaseURL: env("AIWM_DATABASE_URL", ""),
+		BootstrapOrganizationCode: env("AIWM_BOOTSTRAP_ORGANIZATION_CODE", ""),
+		BootstrapOrganizationName: env("AIWM_BOOTSTRAP_ORGANIZATION_NAME", ""),
+		BootstrapUsername: env("AIWM_BOOTSTRAP_USERNAME", ""),
+		BootstrapPassword: env("AIWM_BOOTSTRAP_PASSWORD", ""),
 		StateFile:      env("AIWM_STATE_FILE", ".local/control-plane.gob"),
 		PublicAPIToken: env("AIWM_API_TOKEN", ""),
 		TLSCertFile:    env("AIWM_TLS_CERT_FILE", ""), TLSKeyFile: env("AIWM_TLS_KEY_FILE", ""),
@@ -95,11 +105,8 @@ func Load() (Config, error) {
 	if (config.TLSCertFile == "") != (config.TLSKeyFile == "") {
 		return Config{}, fmt.Errorf("both TLS certificate and key are required")
 	}
-	if config.PublicAPIToken == "" {
-		return Config{}, fmt.Errorf("AIWM_API_TOKEN is required")
-	}
-	if config.EnrollmentToken == "" {
-		return Config{}, fmt.Errorf("AIWM_ENROLLMENT_TOKEN cannot be empty")
+	if config.DatabaseURL == "" {
+		return Config{}, fmt.Errorf("AIWM_DATABASE_URL is required")
 	}
 	return config, nil
 }

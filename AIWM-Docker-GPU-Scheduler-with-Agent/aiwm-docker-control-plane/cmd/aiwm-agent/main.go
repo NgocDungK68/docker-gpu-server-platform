@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent"
 	agentconfig "github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent/config"
@@ -21,7 +23,9 @@ const agentVersion = "0.2.0"
 func main() {
 	checkOnly := flag.Bool("check", false, "verify Docker Engine and NVML access, print inventory, then exit")
 	flag.Parse()
-	configuration, err := agentconfig.Load()
+	loadConfig:=agentconfig.Load
+	if *checkOnly { loadConfig=agentconfig.LoadForCheck }
+	configuration, err := loadConfig()
 	if err != nil {
 		slog.Error("load agent configuration", "error", err)
 		os.Exit(1)
@@ -34,19 +38,24 @@ func main() {
 		os.Exit(1)
 	}
 	defer docker.Close()
-	gpuReader, err := gpu.New()
-	if err != nil {
-		logger.Error("initialize NVIDIA NVML adapter", "error", err)
-		os.Exit(1)
+	gpuReader, nvmlError := gpu.New()
+	if nvmlError==nil { defer gpuReader.Close() }
+	checkCtx,cancelCheck:=context.WithTimeout(context.Background(),configuration.RequestTimeout)
+	compatibility:=agent.Preflight(checkCtx,docker,gpuReader,nvmlError)
+	cancelCheck()
+	if *checkOnly || compatibility.Status!=agent.PlatformSupported {
+		_ = json.NewEncoder(os.Stdout).Encode(compatibility)
+		if compatibility.Status!=agent.PlatformSupported { os.Exit(1) }
 	}
-	defer gpuReader.Close()
 	collector := agent.NewInventoryCollector(docker, gpuReader, agent.ProcCgroupResolver{}, configuration.InventoryPolicy)
 	if *checkOnly {
-		if err := docker.Ping(context.Background()); err != nil {
+		ctx,cancel:=context.WithTimeout(context.Background(),30*time.Second)
+		defer cancel()
+		if err := docker.Ping(ctx); err != nil {
 			logger.Error("Docker Engine preflight failed", "error", err)
 			os.Exit(1)
 		}
-		report, err := collector.Snapshot(context.Background(), 1)
+		report, err := collector.Snapshot(ctx, 1)
 		if err != nil {
 			logger.Error("inventory preflight failed", "error", err)
 			os.Exit(1)

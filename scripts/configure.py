@@ -1,6 +1,7 @@
-"""Create local AIWM configuration with random secrets, preserving existing files."""
+"""Tạo cấu hình local, giữ giá trị đã có và không in credentials."""
 from pathlib import Path
 import secrets
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane"
@@ -31,9 +32,24 @@ def ensure(path, values):
 
 if __name__ == "__main__":
     config = read_env(ROOT / ".env")
-    for key in ["AIWM_ENROLLMENT_TOKEN", "AIWM_API_TOKEN"]:
+    for key in ["AIWM_POSTGRES_PASSWORD", "AIWM_BOOTSTRAP_PASSWORD"]:
         if not config.get(key, "").strip():
             config[key] = secrets.token_hex(32)
+    password = quote(config["AIWM_POSTGRES_PASSWORD"], safe="")
+    defaults = {
+        "AIWM_DATABASE_URL": "postgres://aiwm:" + password + "@localhost:5432/aiwm?sslmode=disable",
+        "AIWM_COMPOSE_DATABASE_URL": "postgres://aiwm:" + password + "@postgres:5432/aiwm?sslmode=disable",
+        # Metadata demo có thể đổi; không đi vào scheduler/policy.
+        "AIWM_BOOTSTRAP_ORGANIZATION_CODE": "VTT",
+        "AIWM_BOOTSTRAP_ORGANIZATION_NAME": "Viettel Telecom",
+        "AIWM_BOOTSTRAP_USERNAME": "admin",
+        "AIWM_A100_ENROLLMENT_TOKEN": "",
+        "AIWM_T4_ENROLLMENT_TOKEN": "",
+        "AIWM_SESSION_COOKIE_SECURE": "false",
+    }
+    for key,value in defaults.items():
+        if not config.get(key, "").strip():
+            config[key] = value
     ensure(ROOT / ".env", config)
     ensure(BACKEND / ".env", {
         **config, "AIWM_HTTP_ADDR": "127.0.0.1:8080",
@@ -42,12 +58,12 @@ if __name__ == "__main__":
         "AIWM_AGENT_OFFLINE_AFTER": "20s",
     })
     ensure(BACKEND / ".env.agent", {
-        "AIWM_ENROLLMENT_TOKEN": config["AIWM_ENROLLMENT_TOKEN"],
+        "AIWM_ENROLLMENT_TOKEN": "",
         "AIWM_CONTROL_PLANE_URL": "http://localhost:8080",
     })
     ensure(FRONTEND / ".env.local", {
         "AIWM_API_BASE_URL": "http://localhost:8080",
-        "AIWM_API_TOKEN": config["AIWM_API_TOKEN"],
+        "AIWM_SESSION_COOKIE_SECURE": config["AIWM_SESSION_COOKIE_SECURE"],
         "NEXT_PUBLIC_REFRESH_INTERVAL_MS": "2000",
     })
-    print("Secrets were generated locally and were not printed. Start with docker compose up --build -d.")
+    print("Cấu hình đã lưu, không in secret. Xem docs/TESTING_RUNBOOK.md: PostgreSQL -> migrate -> bootstrap -> login -> enrollment -> Agent.")

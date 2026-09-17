@@ -4,6 +4,33 @@ Tài liệu mô tả source đang có trong workspace, không mô tả thiết k
 
 Nguồn định nghĩa chính: [domain/model.go][model]. Nguồn hành vi: [application/controlplane.go][cp], [memory/store.go][store], [memory/lifecycle.go][lifecycle], [memory/accounting.go][accounting]. Các state machine dưới đây tổng hợp các nhánh đang được gọi; code chưa có một bảng chuyển trạng thái tập trung.
 
+
+
+## Organization, User, Enrollment và tenancy
+
+Phần bổ sung ngày 17/09/2026 dựa trên implementation tĩnh, chưa chạy kiểm chứng. Các path `internal/...` thuộc backend Go.
+
+| Entity | Identity / field chính | Relationship / lifecycle owner | Source |
+|---|---|---|---|
+| `Organization` | `ID`, `Code` unique, `Name`, `Enabled`, `CreatedAt/UpdatedAt` | 1 → nhiều User/Server/Job; ADMIN tạo/sửa metadata | `domain/organization.go`, `application/identity.go` |
+| `User` | `ID`, username chuẩn hóa chữ thường unique, `PasswordHash`, `Role`, `OrganizationID`, `Enabled` | Mỗi account thuộc một Organization; không public self-registration; tổ chức account không đổi qua update | Cùng domain; `IdentityService.SaveUser` |
+| `Principal` | User + Organization; `ScopeOrganizationID` chỉ cho ADMIN lọc đọc | Giá trị request context sau xác thực, không nhận từ body | `domain.WithPrincipal`, `httpapi.sessionAuth` |
+| Session | Hash opaque token, user ID, expiry 8 giờ | PostgreSQL kiểm tra User/Organization enabled mỗi request; logout hoặc sửa User revoke; không JWT/refresh token | `postgres.Store.SessionPrincipal/CreateSession/DeleteSession` |
+| `Enrollment` | ID, ServerID được cấp trước, OrganizationID, displayName, labels, token hash, expiresAt, machineId, revoked | Token trả một lần; bind đầu trong 24 giờ; đã bind chỉ cùng machine được register lại. Revoke chặn register, không dừng Agent/container đã chạy | `IdentityService.CreateEnrollment`, `postgres.Store.BindEnrollment` |
+| `ServerOwnership` | ServerID, MachineID unique, OrganizationID | PostgreSQL authority; enrollment transaction bind machine/server/org, runtime store giữ bản copy bất biến | `ports.MetadataRepository`, `store/postgres/001_metadata.sql` |
+| `agent.CompatibilityReport` | status, schedulable, OS/architecture/kernel/cgroup, Docker version/API/runtime, NVML/GPU count, issues | Preflight local, không persist thành Server status; SUPPORTED/DEGRADED/UNSUPPORTED | `agent/preflight.go`, `dockerengine.Engine.Compatibility` |
+
+**Invariant:** `Job.OrganizationID != "" && Job.OrganizationID == Server.OrganizationID`. Preview, Scheduler.filter và CommitAssignment cùng enforce, trước GPU filtering/scoring/reserve. Không lưu organization trên GPU; suy ra GPU → Server → Organization. GPU list API expose `organizationId` dạng derived field.
+
+Job mới lấy OrganizationID từ `Principal.User.OrganizationID`; CreateJobRequest không có field organizationId. ADMIN cũng submit cho đơn vị của chính account; organization selector chỉ dành cho enrollment/quản trị/bộ lọc xem. ORGANIZATION_USER đọc list/detail/dashboard/queue và stop/drain chỉ trong đơn vị; ID ngoài scope trả 404, query cố chọn organization trả 403. Application scope được gọi trước mutation, không dựa vào frontend filtering.
+
+`Server.OrganizationID` không được Agent inventory ghi đè. Re-register resolve enrollment trong PostgreSQL rồi Upsert runtime; thay ownership hoặc ServerID đã bind cùng MachineID bị conflict. Server/Job cũ có org rỗng giữ dữ liệu/assignment, không được placement; chưa có migration tự động hoặc API chuyển ownership.
+
+PostgreSQL chứa organizations/users/sessions/server_enrollments/server_ownership; Job/Assignment/Command/inventory vẫn ở memory/durable gob. Không có transaction chung giữa hai storage; bind metadata commit trước Upsert runtime. Lỗi ghi runtime có thể để metadata đã bind: retry cùng enrollment/machine trả lại cùng ownership, không lấy host khác. Hai store phải được backup nhất quán khi phục hồi. Disable Organization được scheduler đọc mỗi cycle, không tự stop workload hiện có và không atomic với runtime commit của cycle đang chạy.
+
+**Failure:** Agent restart verify MachineID, giữ sequence/processed results, re-register và gửi FULL inventory. Heartbeat sau OFFLINE/khoảng mất heartbeat vô hiệu inventory freshness; chỉ inventory hợp lệ mới mở lại scheduling và lease START. Mất Agent/CP/network không giải phóng GPU hoặc stop container. Heartbeat chỉ cho biết thiếu liên lạc, không xác định chính xác host chết hay network partition.
+
+
 ## 1. Domain entities và các representation thực sự tồn tại
 
 ### 1.1 Server
@@ -145,6 +172,11 @@ Mũi tên liền mô tả chứa/tham chiếu bằng field; mũi tên chấm là
 
 ~~~mermaid
 flowchart LR
+    O["Organization"] -->|"1 : nhiều"| USR["User"]
+    O -->|"1 : nhiều"| S
+    O -->|"1 : nhiều"| J
+    O -->|"Enrollment bind"| ENR["Enrollment / ServerOwnership"]
+    ENR --> S
     AP["Agent process + PersistentState"] -. "AgentID = Server.ID" .-> S["domain.Server"]
     S -->|"GPUs: 0..n"| G["domain.GPU"]
     S -->|"Containers: 0..n"| C["domain.Container"]

@@ -3,6 +3,7 @@ module github.com/VDT-AI-2026/aiwm-docker-control-plane
 go 1.24.0
 
 require (
+	github.com/lib/pq v1.10.9
 	github.com/NVIDIA/go-nvml v0.13.3-1
 	github.com/containerd/errdefs v1.0.0
 	github.com/moby/moby/api v1.55.0

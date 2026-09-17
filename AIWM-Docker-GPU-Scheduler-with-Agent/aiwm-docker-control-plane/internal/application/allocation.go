@@ -48,6 +48,8 @@ type JobPreview struct {
 
 // prepareJob is shared by preview and submit; client evaluation results are never accepted.
 func (c *ControlPlane) prepareJob(ctx context.Context, r domain.CreateJobRequest) (domain.Job, error) {
+	p,authenticated:=domain.CurrentPrincipal(ctx)
+	if c.metadata!=nil && !authenticated { return domain.Job{},domain.ErrUnauthorized }
 	if r.Backend == "" {
 		r.Backend = domain.BackendDocker
 	}
@@ -63,7 +65,7 @@ func (c *ControlPlane) prepareJob(ctx context.Context, r domain.CreateJobRequest
 	needed, _ := time.Parse(time.RFC3339, r.NeededAt)
 	r.NeededAt = needed.UTC().Format(time.RFC3339)
 	now := c.now().UTC()
-	job := domain.Job{AllocationIntent: r.AllocationIntent, Name: strings.TrimSpace(r.Name), Image: r.Image, Backend: r.Backend,
+	job := domain.Job{OrganizationID:p.User.OrganizationID,AllocationIntent: r.AllocationIntent, Name: strings.TrimSpace(r.Name), Image: r.Image, Backend: r.Backend,
 		Command: r.Command, Environment: r.Environment, Resources: resources, Strategy: c.scheduler.defaultStrategy,
 		Status: domain.JobQueued, CreatedAt: now, UpdatedAt: now}
 	job.Policy, err = c.policy.Evaluate(ctx, job, now)
@@ -99,6 +101,7 @@ func (c *ControlPlane) matchJob(ctx context.Context, job domain.Job) (ResourceMa
 	result := ResourceMatch{RecommendedGPUModels: []string{}}
 	models := map[string]bool{}
 	for _, server := range servers {
+		if !domain.SameOrganization(job.OrganizationID,server.OrganizationID) { continue }
 		if !server.Schedulable(now, c.offlineAfter) || !labelsMatch(server.Labels, job.ServerSelector) {
 			continue
 		}
@@ -129,6 +132,7 @@ func (c *ControlPlane) matchJob(ctx context.Context, job domain.Job) (ResourceMa
 }
 func friendlyPlacementReason(reason string) string {
 	for _, item := range [][2]string{
+		{"organization ownership", "Chưa có server thuộc organization của tài khoản."},
 		{"no online agent", "Chưa có server online với inventory mới, hoặc server đang drain."},
 		{"model unavailable", "Chưa có GPU đáp ứng profile hiệu năng và yêu cầu FP8."},
 		{"no healthy", "GPU phù hợp chưa healthy."},

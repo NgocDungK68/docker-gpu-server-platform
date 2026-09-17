@@ -1,314 +1,101 @@
-# API audit và kiểm thử bằng Postman
+# API và kiểm thử bằng Postman
 
-Tài liệu dựa trên routes, handlers, middleware và use cases đang có: **start system → health → cấu hình token → test API → đọc response → tìm source để sửa**. Đã cập nhật contract Policy-driven Allocation: thêm jobs/options, jobs/preview và đổi Create Job sang intent.
+Cập nhật Organization/session/enrollment ngày 17/09/2026 bằng inspection tĩnh. Không chạy API, migration, Newman hoặc build/test trong task. Backend source là authority; xem [TESTING_RUNBOOK](TESTING_RUNBOOK.md) để khởi động PostgreSQL/CP/frontend/Agent.
 
-## Luồng allocation mới: chạy ngay trên Windows
+## 1. Login, current user và logout
 
-Nếu đang dùng image CP cũ, chạy lại từ workspace root:
+Không public self-registration. Bootstrap admin đầu tiên qua CLI `aiwm-server --bootstrap-admin`; ADMIN cấp account còn lại.
 
-~~~powershell
-python scripts/configure.py
-docker compose up --build -d control-plane agent-a100 agent-t4
-~~~
+| API | Request / quyền | Kết quả |
+|---|---|---|
+| POST /api/v1/auth/login | `{"username":"{{username}}","password":"{{password}}"}`, không bearer | 200 data.token opaque + expiresAt + user + organization; sai credential/disabled → 401; rate limit → 429. |
+| GET /api/v1/auth/me | Bearer access_token | 200 user.id/username/role/organizationId/enabled và organization metadata. |
+| POST /api/v1/auth/logout | Bearer access_token | 200 loggedOut=true; token cũ không còn hợp lệ. |
 
-Chỉ test policy/validation, không cần GPU/inventory: tại thư mục backend chạy `go run ./cmd/aiwm-server` (sau configure, tránh port 8080 đang dùng). Native Windows chạy CP được; production Agent NVML cần Linux. Agent Sim chạy Linux qua Docker Desktop, WSL không bắt buộc.
+Session có TTL 8 giờ, hash lưu PostgreSQL; không JWT/refresh token. PasswordHash PBKDF2-SHA256 không serialize JSON. Đổi User thu hồi session cũ. PostgreSQL unavailable không fallback sang bearer chung. Header `AIWM_API_TOKEN` không còn là credential production.
 
-Import collection/environment, set `base_url=http://localhost:8080` và `access_token` bằng `AIWM_API_TOKEN`. **Không có Login API**; không dùng enrollment/agent token cho public endpoints.
+## 2. Organizations và Users (ADMIN)
 
-Thứ tự gửi chính xác:
-
-1. `Health - Control Plane`.
-2. `Security - Token hợp lệ` trong folder Authentication (hoặc GET Jobs với Bearer, kỳ vọng 200).
-3. `Allocation 01 - Options`.
-4. `Allocation 02 - Preview TRAINING`.
-5. `Allocation 03 - Preview INFERENCE`.
-6. `Allocation 04 - Submit TRAINING` (capture `allocation_job_id`).
-7. `Allocation 05 - Schedule once`.
-8. `Allocation 06 - GET placement status`; gửi lại để xem ASSIGNED/STARTING/RUNNING; đọc `assignment.serverId/gpuUuids` và `statusReason`.
-9. `Allocation 07 - Stop Job vừa tạo` khi xem xong; poll GET đến terminal nếu Agent đã dispatch.
-
-Các bước 3–9 nằm trong folder **Allocation - Policy Preview Submit**; chạy cả folder còn có 18 negative validation cases. `allocation_expect_placement=false` mặc định: thiếu GPU vẫn test QUEUED hợp lệ; chỉ set true khi đã chắc đủ inventory. Preview chưa giữ GPU, Submit re-evaluate và vào queue chung. Để submit INFERENCE, dùng chính body Preview INFERENCE gửi POST /jobs; reason CUSTOM đã có explanation.
-
-Defaults: ngoài plan, quota 4/used 0. Đổi demo facts theo [CONFIGURATION](CONFIGURATION.md), recreate CP rồi preview lại để quan sát auto/competitive lanes. Dữ liệu này chưa là quota accounting production. [SCHEDULER](SCHEDULER.md) giải thích policy và giới hạn TTL/neededAt.
-
-## 1. Kết quả audit
-
-- **21 endpoint backend**, tính theo cặp HTTP method + route pattern trong `internal/httpapi/server.go`.
-- **16 public endpoints**: 2 health/readiness không auth + 14 business endpoints dùng public bearer.
-- **5 Agent/internal endpoints**: register, heartbeat, inventory, command polling, ACK.
-- **0 endpoint login/refresh/logout/user session/API-key management**. Register là credential bootstrap cho Agent, thuộc nhóm 5 internal; Security là scope giao nhau, không cộng trùng endpoint.
-- Backend phục vụ HTTP JSON, có thể bật HTTPS. Agent gọi outbound protocol v1; không có Agent inbound HTTP server, gRPC, WebSocket, SSE hoặc GraphQL được implement.
-- Agent gọi Docker SDK qua local socket/named pipe, NVML qua library; đây là adapter, không phải AIWM public API cho Postman.
-- Next.js có `GET /api/aiwm-health` và BFF `GET/POST /api/aiwm/[...path]` whitelist 14 business routes; không cộng vào 21 backend endpoints.
-- CORS middleware trả `OPTIONS` 204; framework xử lý method/path mặc định. Không tính chúng như feature endpoints riêng.
-- **Workload trên Console = Job**. Actual Container nằm ở `/containers` hoặc `Server.containers`. Không có `/workloads`, `/servers/{id}/workloads`, Container stop/delete, `/reconcile`, policy CRUD. Preview allocation hiện có tại POST /api/v1/jobs/preview.
-
-| API status | Ý nghĩa trong audit |
+| API | Nội dung |
 |---|---|
-| READY | Route implement và gọi được với prerequisites đã nêu; không đồng nghĩa production hoàn chỉnh. |
-| PARTIAL | Route có thật, nhưng có limitation về contract/semantics/lifecycle cần đọc trước. |
-| INTERNAL | Dành cho Agent; Postman chỉ kiểm thử protocol trên CP riêng. |
-| DEPRECATED / TODO | Không có endpoint nào được gắn hai status này trong collection; không tạo placeholder API. |
+| GET /api/v1/organizations | ADMIN xem nhiều đơn vị; ORGANIZATION_USER chỉ thấy đơn vị của mình. |
+| POST /api/v1/organizations | ADMIN tạo: code, name, enabled. ID backend sinh; code unique. |
+| POST /api/v1/organizations/{organizationID} | ADMIN sửa metadata/status; không chuyển ownership Server/Job. |
+| GET /api/v1/users | Chỉ ADMIN, response không chứa passwordHash. |
+| POST /api/v1/users | username, password, role ADMIN/ORGANIZATION_USER, organizationId, enabled. |
+| POST /api/v1/users/{userID} | Cùng DTO; password rỗng giữ hash cũ. Organization account bất biến, khác org → 409; sửa account revoke session. |
 
-Path `internal/...`, `cmd/...`, `api/...` dưới đây thuộc backend `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane`; `src/...` thuộc frontend `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console`.
+## 3. Server Enrollment
 
-Tham khảo [Domain Model](DOMAIN_MODEL.md), [Architecture](ARCHITECTURE.md), [Scope traceability](TRACEABILITY.md), [OpenAPI](../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/api/openapi.yaml).
+`POST /api/v1/enrollments` nhận displayName, labels; ORGANIZATION_USER **không gửi organizationId**, backend lấy từ account. ADMIN được gửi organizationId. GPU tự discovery, không có API nhập GPU thủ công.
 
-## 2. Điều kiện trước khi test API
+Response 201 gồm id/serverId/organizationId/displayName/labels/expiresAt và **enrollmentToken chỉ trả một lần**. Token hash lưu PostgreSQL. `GET /api/v1/enrollments` scope theo account, không trả token. `POST /api/v1/enrollments/{enrollmentID}/revoke` trả revoked=true; chặn register lại, không thu hồi Agent token đã cấp hoặc stop runtime.
 
-**Chỉ mở Postman chưa đủ:** Control Plane phải đang chạy tại `base_url`. Postman không tự start CP/Agent/Docker/frontend.
+Register vẫn dùng `X-Enrollment-Token` và v1 DTO có machineId/name/protocolVersion. CP resolve enrollment → ServerOwnership → Organization; không tin organization từ Agent. Token bind lần đầu trong 24 giờ. Sau bind chỉ cùng machine được register lại; MachineID trùng ownership khác → conflict, token dùng cho machine khác → unauthorized. Re-register giữ ServerID, xoay Agent token và reset freshness.
 
-| Mục tiêu | Điều kiện tối thiểu |
+## 4. Quyền xem và mutation
+
+- Normal user: list Server/GPU/Container/Job/Queue/Summary chỉ trong Organization; get/stop/drain ID ngoài scope → 404.
+- Query `organizationId` chỉ dành ADMIN. Non-admin gửi query này → 403, kể cả ID của chính mình.
+- Submit/Preview không nhận organizationId trong JSON → 400 nếu gửi. Job lấy org của account, **kể cả ADMIN**; filter xem không thay org submit.
+- ADMIN mới được gọi POST scheduler/run-once. Worker tự chạy theo ticker nên user không cần quyền này để Job được schedule.
+- Summary có serversOffline/gpusReserved/gpusAllocated/gpusUnhealthy bổ sung; free count chỉ tính host schedulable. GPU list thêm organizationId derived từ Server.
+- Agent API nằm ngoài BFF whitelist; Agent không đổi organization bằng register body/inventory/labels.
+
+## 5. Import, variables và thứ tự gửi
+
+Import `postman/AIWM.postman_collection.json` và `AIWM.local.postman_environment.json`. Mẫu không chứa credentials thật. Điền secrets chỉ ở environment riêng; không export sau chạy.
+
+| Variable | Nguồn |
 |---|---|
-| Health/readiness, auth negative tests | CP đang phục vụ HTTP. |
-| List Server/GPU/Container/Jobs | CP + token; không có Agent vẫn gọi được, trả empty hoặc last-known data từ snapshot. |
-| Submit/inspect/cancel QUEUED Job, Queue, Run once | CP + token. Không có Agent thì Job chưa thực thi. |
-| Có inventory demo | CP + Agent Sim; Docker Desktop Linux chạy image chứa Agent core + NVIDIA NVML mock library. DockerRuntime bên trong simulator là mô phỏng. |
-| Job RUNNING/STOPPED trong demo | CP + Agent Sim, inventory fresh, GPU phù hợp không bị chiếm. Không cần GPU vật lý trên laptop. |
-| Chạy image/container NVIDIA thật | CP + production Agent Linux, Docker Engine, NVIDIA driver/Toolkit, NVML và physical GPU. Native Windows NVML adapter không hỗ trợ. |
-| Agent wire fixture bằng Postman | CP riêng + enrollment token; không cần Agent process/Docker/NVML. Chỉ chứng minh protocol/accounting từ JSON fixture, không chứng minh discovery/execution. |
-| Frontend BFF | Next + CP; Next có server-side AIWM_API_TOKEN. Backend Postman không cần frontend. |
+| base_url | CP đang kiểm thử, mặc định localhost:8080. |
+| username / password | Account do bootstrap hoặc ADMIN cấp. |
+| access_token | Login tự capture; không nhập token cấu hình dùng chung. |
+| organization_id / current_role | Current user tự capture. |
+| enrollment_id / enrollment_token | Create enrollment tự capture. |
+| agent_id / agent_token | Register fixture capture, **không dùng credential của Agent thật đang chạy**. |
+| fixture_machine_id / fixture_gpu_* | Fixture độc lập, sinh khi tạo enrollment. |
+| job_id / command_id / inventory_sequence | Response hoặc script fixture cập nhật. |
+| other_organization_id / other_server_id / other_job_id | ID ngoài đơn vị để thử tenancy; lấy bằng account ADMIN, không lấy secret của người khác. |
+| organization_code / organization_name / new_username / new_password | Metadata tạo qua folder ADMIN, không hardcode vào business logic. |
 
-**Không cần database service:** CP dùng `store/durable`, gob snapshot trên local disk + process lock. `migrations/*.sql` là reference schema; chưa có SQL adapter chạy. State directory cần ghi được; một state file chỉ dùng một CP writer.
+Gửi từng bước, không chạy toàn collection cũ một lượt:
 
-## 3. Chạy hệ thống để test Postman
+1. Health.
+2. Login.
+3. Current user.
+4. Organizations; ADMIN có thể mở folder quản trị tạo User/Organization.
+5. Create enrollment.
+6. Với Agent Sim/thật: start Agent theo runbook. Với **CP fixture riêng**: dùng folder `Organization - Protocol nội bộ` để Register/Inventory. Không gửi fake report vào Agent production.
+7. Servers và GPUs, kiểm tra organizationId và occupancy.
+8. Options → Preview → Submit, body giữ AllocationIntent; không chọn UUID/server/priority/strategy.
+9. Queue/Get Job; chờ ticker hoặc ADMIN run-once. Nếu thao tác tay vượt freshness timeout, refresh inventory fixture trước schedule.
+10. Nếu fixture: Poll → ACK → Inventory running (không phải Docker execution thật).
+11. Stop → actual terminal inventory → Job terminal + reservation RELEASED.
+12. Logout; dùng token vừa logout GET me phải 401.
 
-### Recommended demo path — Windows PowerShell + Docker Desktop Linux
+Các folders cũ được giữ để không mất fixture/error examples, nhưng auth/enrollment assumptions cũ phải được sửa khi dùng lại. Số liệu PASS/Newman của task trước không chứng nhận tenancy/session mới. Không dùng scripts acceptance/recovery cũ như một phép kiểm thử tenant-aware.
 
-Từ workspace root:
+## 6. Ma trận kiểm thử tenancy tối thiểu
 
-~~~powershell
-python scripts/configure.py
-docker compose up --build -d control-plane agent-a100 agent-t4
-docker compose ps
-python scripts/doctor.py
-~~~
-
-- Docker Desktop phải chạy Linux containers; build lần đầu cần tải images/dependencies/mock library.
-- Configure tạo token còn thiếu, giữ giá trị đã có và không in secret.
-- `base_url = http://localhost:8080`; **không thêm /api/v1 hoặc trailing slash vào variable**.
-- Agent A100: `machineId=sim-a100`, labels `site=hanoi,pool=simulation`, 4 GPU, External grant ở index 0.
-- Agent T4: `machineId=sim-t4`, labels `site=hcm,pool=simulation`, 2 GPU.
-- Demo sạch có 6 GPU, 1 External, tối đa 5 GPU cấp phát được khi hai Server fresh/undrained. Counts thay đổi theo Jobs/profiles.
-
-### Health check first
-
-~~~powershell
-Invoke-RestMethod http://localhost:8080/healthz
-Invoke-RestMethod http://localhost:8080/readyz
-~~~
-
-Expected: `data.status=ok` và `ready`. Nếu connection refused/timeout, kiểm tra `docker compose ps` và `docker compose logs --tail 30 control-plane agent-a100 agent-t4` trước business API. Health thành công chưa chứng minh Agent/inventory sẵn sàng.
-
-**Frontend tùy chọn:**
-
-~~~powershell
-docker compose --profile console up --build -d
-~~~
-
-Frontend ở `http://127.0.0.1:3000`. Chỉ bật `enable_frontend_test=true` khi cần folder BFF. Có thể chạy frontend native bằng lệnh trong [README](../README.md); không chạy trùng port 3000.
-
-**Chỉ cần CP để học API cơ bản:**
-
-~~~powershell
-python scripts/configure.py
-docker compose up --build -d control-plane
-~~~
-
-Hoặc chạy `go run ./cmd/aiwm-server` trong backend đã configure. Không chạy cùng port 8080 với Compose; không có bước start DB.
-
-### CP riêng để gọi Agent/Internal thủ công
-
-Mở **PowerShell terminal mới**, từ workspace root:
-
-~~~powershell
-cd AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane
-$env:AIWM_HTTP_ADDR="127.0.0.1:18080"
-$env:AIWM_STATE_FILE=".local/postman-control-plane.gob"
-$env:AIWM_AGENT_OFFLINE_AFTER="10m"
-go run ./cmd/aiwm-server
-~~~
-
-- Dùng binary/config có thật; đọc public/enrollment token từ backend `.env` đã configure, trừ khi process env override.
-- `internal_base_url=http://127.0.0.1:18080`, khác `base_url`. Kiểm tra GET `http://127.0.0.1:18080/healthz`.
-- `access_token` phải khớp cả hai CP nếu chạy chung collection; `enrollment_token` phải khớp CP riêng.
-- Bật `enable_agent_internal=true`, chạy **nguyên folder 08**. Folder tự tạo MachineID, GPU/container fixture và Job/commands riêng.
-- Không cho Agent Sim/production dùng CP fixture, không lấy ID/token của Agent đang chạy để gửi report/ACK thủ công.
-- Timeout 10m cho thao tác tay; nếu nghỉ lâu, gửi lại heartbeat và inventory sequence mới trước scheduling.
-- Ctrl+C dừng CP test. State được giữ, không có DELETE Agent/Job API để reset; dùng state file test mới nếu cần phiên sạch.
-
-WSL không bắt buộc cho đường Docker Desktop. Linux/WSL dùng `python3` và shell env syntax tương ứng; xem [Windows/WSL](WINDOWS-WSL.md).
-
-Các lệnh trên đã đối chiếu `README.md`, `compose.yaml`, `scripts/configure.py`, `scripts/doctor.py`, `cmd/aiwm-server/main.go` và `internal/config/config.go`; không tạo một service/database mới cho runbook.
-
-## 4. Authentication & Security Flow
-
-### Có phải gọi API security trước business API không?
-
-**Không có login endpoint.** Token cấu hình trước startup; Postman gọi thẳng business API:
-
-~~~http
-Authorization: Bearer {{access_token}}
-~~~
-
-`access_token` là giá trị `AIWM_API_TOKEN`, không phải JWT/OAuth token do login cấp.
-
-| Credential | Lấy ở đâu | Header / validate | Expiry / rotation |
-|---|---|---|---|
-| Public API token | Root `.env` cho Compose; backend `.env` cho native; `AIWM_API_TOKEN` | `Authorization: Bearer ...`; `security.go::publicAuth/bearerToken`, constant-time compare | Không TTL/refresh. Đổi config + restart CP, đồng bộ Next/Postman. |
-| Enrollment token | `AIWM_ENROLLMENT_TOKEN` của CP và Agent | `X-Enrollment-Token: ...` chỉ cho Register; `ControlPlane.RegisterAgent` validate | Không TTL; đổi config/restart. Không thay public bearer. |
-| Agent token | `RegisterAgent.data.agentToken`; local Agent state | Bearer + đúng AgentID; `withAgentAuth → AuthenticateAgent → store.AuthenticateAgent` so SHA-256 hash | Không expiry. Re-enroll cùng MachineID đổi token/hash, token cũ mất hiệu lực; không phải expired-token flow. |
-
-- CP startup yêu cầu cả hai env tokens; `internal/config/config.go` load `.env` từ working directory, process env ưu tiên.
-- Mở `.env` trong editor, copy **giá trị** AIWM_API_TOKEN vào local/private Postman `access_token`. Không thêm `Bearer ` trong value vì collection tự thêm prefix.
-- File environment mẫu không chứa secret thật. Không ghi/export credential thật vào artifacts chia sẻ.
-- Business tests không cần đọc state/credential của Agent Sim.
-- No-token/invalid-token requests override auth để không thừa kế bearer đúng.
-- Không có login/refresh/logout/revoke/token-validation API, users/RBAC/tenant/session. Kiểm tra token bằng GET Jobs.
-- `publicAuth` bỏ qua prefix `/api/v1/agents/`; các routes này dùng credential boundary riêng.
-- Production `cmd/aiwm-server` truyền `httpapi.Options{PublicAPIToken:...}`. Một số integration tests gọi `httpapi.New` không Options nên thiếu public middleware ở harness; không suy ra production API cho anonymous access.
-
-### Frontend và Agent
-
-~~~text
-Browser → Next /api/aiwm/<public-path>
-        → BFF đọc AIWM_API_TOKEN phía server
-        → CP /api/v1/<public-path> với Bearer token
-
-Agent → Register với X-Enrollment-Token
-      → lưu agentId + agentToken
-      → Heartbeat / Inventory / Poll / ACK với Agent bearer
-~~~
-
-- Browser không có login/token exchange. BFF không validate/forward bearer từ browser; nó dùng token của Next server.
-- BFF chỉ whitelist GET/POST public routes; không proxy Agent/Docker.
-- POST nếu có Origin header phải khớp inbound Host, sai → 403. Không có Origin (thường Postman) được check cho qua.
-- Origin check và backend bearer chưa phải user authentication; Console dùng local/trusted operator hoặc authenticated gateway như README.
-- Config Next: `src/config/server.ts`; proxy/auth policy: `src/app/api/aiwm/[...path]/route.ts`, `src/lib/api/proxy-policy.ts`.
-- Agent client: `internal/agent/controlplane/client.go`; registration/retry/local history: `internal/agent/runner.go`.
-- HTTPS CP bật khi có cert/key. Agent hỗ trợ custom CA/client cert; CP listener hiện không tự enforce mTLS client certificate. HTTP demo không cần TLS credential flow.
-
-## 5. Import collection và environment
-
-1. Import [collection](../postman/AIWM.postman_collection.json) và [local environment](../postman/AIWM.local.postman_environment.json), chọn environment đó.
-2. Điền `access_token`, kiểm tra `base_url`, Send Health rồi `Security - Token hợp lệ`.
-3. Demo đầy đủ: chạy collection bằng **Collection Runner**, 1 iteration. Không chạy đồng thời acceptance/recovery hoặc collection khác dùng chung pool.
-4. Chỉ CP: chọn Health/Security/Jobs/Queue; bỏ các folder cần inventory/E2E.
-5. `Send` một request không tự chuyển request kế tiếp. Các bước poll phải Send nhiều lần hoặc dùng Runner; scripts lưu IDs bằng `pm.environment.set` và điều khiển Runner bằng `pm.execution.setNextRequest`. Nguồn: [environment variables](https://learning.postman.com/docs/use/send-requests/variables/environment-variables/), [request order](https://learning.postman.com/docs/tests-and-scripts/running-collections/building-workflows/).
-6. Internal/BFF/Drain mặc định skip; chỉ bật variables tương ứng khi đủ prerequisites. Dùng [pm.execution.skipRequest](https://learning.postman.com/docs/tests-and-scripts/write-scripts/postman-sandbox-reference/pm-execution/).
-7. Collection theo [schema v2.1](https://schema.postman.com/json/collection/v2.1.0/collection.json). Không cần Postman API key hoặc mock server.
-
-### Variables
-
-| Variable | Giá trị / cách dùng |
+| Tình huống | Mong đợi |
 |---|---|
-| `base_url` | `http://localhost:8080`, CP demo. |
-| `access_token` | Trống trong file; nhập AIWM_API_TOKEN. |
-| `machine_id` / `server_id` | `sim-a100` để chọn demo host; script capture Server.ID. |
-| `job_id` / `container_id` | Capture từ Job/observation; không có `workload_id` vì không có entity đó. |
-| `job_image` | `alpine:3.21`; Sim không chạy image, production Agent có chạy. |
-| `max_polls` | 60; khoảng 1 giây mỗi vòng chưa đạt. Đây là test setting, không phải API field. |
-| `enable_drain_test` / `previous_drained` | Mặc định false; Detail lưu drain cũ, cặp Drain/Restore đổi rồi khôi phục. |
-| `internal_base_url` / `enable_agent_internal` | CP riêng port 18080, mặc định không chạy. |
-| `enrollment_token` / `agent_id` / `agent_token` | Credential CP fixture; Register capture Agent ID/token. Không dùng Agent Sim identity. |
-| `manual_machine_id` / `manual_gpu_uuid` / `manual_external_gpu_uuid` | Fixture IDs tự tạo; không phải hardware được NVML xác minh. |
-| `manual_job_id` / `manual_container_id` / `command_id` | Job/command capture từ CP riêng; container ID là fixture do test đặt. |
-| `inventory_sequence` / `observed_at` | Counter/time cho reports; replay cố ý giữ sequence để nhận 409. |
-| `frontend_url` / `enable_frontend_test` | `http://127.0.0.1:3000`, chỉ bật khi Next chạy. |
-| `case_id`, `e2e_*`, `negative_id` | Script tạo counters/preconditions/baseline/ID cho test; không phải domain entity fields. |
+| VTT user GET servers/gpus/jobs/summary | Chỉ dữ liệu VTT. |
+| VTT user GET hoặc stop Job VDS | 404; Job VDS không thay đổi. |
+| VTT user get/drain Server VDS | 404; Server không thay đổi. |
+| Non-admin query organizationId / body enrollment organizationId | 403. |
+| Submit thêm organizationId, strategy, priority, GPU UUID | 400 strict DTO. |
+| Agent register hoặc inventory thêm organizationId | 400 strict DTO. |
+| Cùng token enrollment, machine khác | 401; không đổi ownership. |
+| Job org-A thiếu GPU, org-B đủ GPU | QUEUED; không reservation/START trên org-B. |
+| Preview lặp | Không tăng Job/Reservation/Command. |
+| Agent heartbeat sau timeout, chưa FULL inventory | Không placement/lease START; last-known inventory/reservation giữ nguyên. |
+| Logout / disabled User / expired session | Public API 401. |
+| ADMIN query organizationId | Đọc đúng đơn vị được chọn; submit vẫn org account. |
 
-Không export environment đã chạy vào file mẫu: runtime environment có thể chứa Agent token mới cấp.
+## 7. Contract cũ còn dùng
 
-### Tổ chức collection
-
-| Folder | Chạy khi nào |
-|---|---|
-| 00 - Health | CP là đủ. |
-| 01 - Authentication / Security | CP + public token cho positive cases; không có login endpoint. |
-| 02 - Dashboard | Agent giúp có inventory; CP độc lập vẫn đọc được. |
-| 03 - Servers | Agent demo để có server_id; Drain/Restore tùy chọn. |
-| 04 - GPUs | Đọc GPU inventory. |
-| 05 - Containers / Existing Workloads | External/Managed observations; không Workload CRUD. |
-| 06 - Jobs | Tạo yêu cầu H100/FP8 chưa có trên demo A100/T4 → queue → cancel; cần fixture không có H100 phù hợp. |
-| 07 - Queue / Scheduler | Run once xử lý toàn queue, count0 hợp lệ. |
-| 08 - Agent Internal APIs | Opt-in, CP riêng; protocol fixtures, reconciliation, failed start, replay/ACK/drain. |
-| 09 - Failure / Reconciliation Tests | 400/404/invalid-origin; reconciliation nằm ở Internal/E2E. |
-| E2E - Submit Job | Demo có External và GPU free; submit/poll/stop/release/preservation. |
-| 10 - Frontend BFF (tùy chọn) | Next + CP; health/proxy/cross-origin rejection. |
-
-## 6. Thứ tự test API từ đầu
-
-~~~text
-Start CP → GET /healthz → GET /readyz
-→ nhập access_token → GET /api/v1/jobs (200)
-→ start Agent Sim / đợi inventory
-→ GET /servers → Server schedulable=true
-→ GET /gpus + GET /containers?origin=LEGACY
-→ POST /jobs → capture job_id
-→ POST /scheduler/run-once (tùy chọn)
-→ GET /jobs/{job_id} đến RUNNING
-→ GET /containers?origin=MANAGED, match jobId
-→ POST /jobs/{job_id}/stop
-→ GET /jobs/{job_id} đến STOPPED + reservation RELEASED
-→ GET /servers/{server_id}, verify UUID đã free
-→ GET /containers?origin=LEGACY, verify External còn nguyên
-~~~
-
-- Path business viết ngắn ở flow có prefix `/api/v1`.
-- Agent Sim **tự register/heartbeat/inventory/poll/ACK**; không gọi Register tay trước E2E Sim.
-- Thiếu GPU: submit vẫn **201 QUEUED**, scheduler ghi reason và thử lại; không normal 422.
-- Inventory có thể đến trước ACK: ASSIGNED → RUNNING không quan sát STARTING.
-- Test bị dừng: giữ job_id, Stop rồi GET đến terminal. Không stop Job khác/External; không có delete API.
-- CP có background scheduler/reconciler; không cần gọi run-once liên tục.
-
-### E2E - Submit Job
-
-- E2E 01 kiểm tra demo host fresh, GPU free và active External; lưu External ID/state/start time/grants cùng tập GPU free.
-- Create capture job_id; poll RUNNING capture Assignment/server/UUID/container, verify UUID thuộc tập free ban đầu.
-- Managed inventory phải có đúng JobID, origin MANAGED, state active.
-- Stop nhận 202, poll đến STOPPED + Assignment RELEASED.
-- Demo không có Job khác giành GPU vừa release: UUID trở FREE/no assignedJobId.
-- External ID/state/startedAt/GPU grants không đổi.
-- Poll có giới hạn; start timeout/terminal sớm fail assertion rồi nhảy Stop để cleanup Job vừa tạo. Stop timeout giữ ID để xử lý tiếp.
-- Sim chứng minh Agent core/NVML mock/orchestration; không chứng minh image chạy, CUDA hoặc natural workload completion.
-
-### Existing Workload
-
-1. Agent discover/Sim seed External trước enrollment.
-2. GET `/containers?origin=LEGACY`: lấy serverId, container.id, state, gpuUuids, startedAt.
-3. GET `/servers/{serverID}`: container nằm trong `containers[]`; đây là cách đọc “Server Workloads” hiện tại.
-4. Match UUID ở `gpus[]`: active External grant thường cho OCCUPIED_LEGACY, observedConsumers có container ID, stateReason giải thích. Health/unknown có ưu tiên accounting riêng.
-5. Phân biệt `Server.schedulable/schedulingReason` (fresh/online/drain) với `GPU.state/stateReason`. Một Server vẫn schedulable khi chỉ một GPU bị External chiếm.
-6. Managed chạy/dừng trên UUID khác, External giữ nguyên. Không có adopt/stop/delete External API.
-
-## 7. Contract chung và source traceability
-
-- Business dùng public bearer; Agent dùng Agent bearer; Register dùng enrollment header.
-- JSON nên gửi `Content-Type: application/json`, `Accept: application/json`. Decoder không enforce strict Content-Type.
-- CP nhận/echo `X-Request-ID` hoặc tự sinh; BFF không forward đầy đủ header này.
-- Success bình thường: `{"data": ...}`. Error: `{"error":{"code":"...","message":"..."}}`; không giả định có cả hai hoặc meta.
-- Unknown route/method có thể trả text từ framework, không phải mọi response đều JSON envelope.
-- Decoder `DisallowUnknownFields`, chỉ một JSON value, body limit 1 MiB khi đọc. “Required” trong OpenAPI không tự được Go decoder enforce, ví dụ `{}` ở drain/ACK.
-- Lists chưa pagination; không invent filters ngoài `origin` và `limit` có xử lý trong handler.
-- Public JobView che environment values; internal Command payload/ACK response có thể chứa environment gốc.
-
-~~~text
-cmd/aiwm-server/main.go → config.Load + durable.Open
-→ httpapi.New / net/http ServeMux
-→ requestContext → recoverPanic → accessLog → cors → bodyLimit → publicAuth
-→ Handler (Agent routes thêm withAgentAuth)
-→ application.ControlPlane
-→ ports.Repository
-→ store/durable wrapper → store/memory transaction
-→ gob snapshot nếu mutation
-~~~
-
-- Probes không gọi Application/Repository.
-- ScheduleOnce → Scheduler.Plan → CommitAssignment; CP không gọi Docker.
-- ReportInventory → inventoryToDomain → ReplaceInventory → reconcileObservedLocked + normalizeGPUState.
-- Agent outbound: `runner.go → agent/controlplane/client.go`; execution: `CommandExecutor → InventoryCollector.GPUsAvailable → DockerRuntime`.
-- `ControlPlane.Reconcile` timer chỉ đánh dấu Server offline; actual Job reconciliation nằm trong inventory transaction.
-- DTO/source of truth chi tiết trong [Domain Model](DOMAIN_MODEL.md).
+Phần dưới giữ chi tiết endpoint inventory/Job/Agent. Đối với mọi public API, hiểu **public bearer = session access_token**. Đường start/demo hiện tại dùng TESTING_RUNBOOK; không dùng hướng dẫn token chung hoặc kết quả kiểm thử lịch sử làm authority.
 
 ## 8. Public APIs — từng endpoint
 
@@ -428,7 +215,7 @@ GET /readyz
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -486,7 +273,7 @@ GET /api/v1/system/summary
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -544,7 +331,7 @@ GET /api/v1/servers
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -600,7 +387,7 @@ GET /api/v1/servers/{serverID}
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -664,7 +451,7 @@ POST /api/v1/servers/{serverID}/drain
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -721,7 +508,7 @@ GET /api/v1/gpus
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -823,7 +610,7 @@ Các fields bắt buộc: name/image, workloadType, resources.gpuCount/minVramMi
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -882,7 +669,7 @@ GET /api/v1/jobs
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -942,7 +729,7 @@ GET /api/v1/jobs/{jobID}
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -1000,7 +787,7 @@ POST /api/v1/jobs/{jobID}/stop
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -1059,7 +846,7 @@ GET /api/v1/queue
 **Caller / Authentication**
 
 - Caller: Frontend qua BFF; Postman/manual test.
-- Auth: `Bearer {{access_token}} (AIWM_API_TOKEN), Required.`
+- Auth: `Bearer {{access_token}} (session login), Required.`
 
 **Request**
 
@@ -1509,32 +1296,11 @@ POST /api/v1/agents/{agentID}/commands/{commandID}/ack
 - 401: thiếu/sai credential của endpoint này.
 - 401: Agent credential sai; 404: command không có hoặc thuộc Agent khác; 400: JSON/unknown field sai.
 
-## 10. Frontend HTTP routes bổ sung
+## 10. Frontend/BFF
 
-### `GET /api/aiwm-health`
+GET /api/aiwm-health chỉ là connectivity probe. GET/POST /api/aiwm/[...path] whitelist public routes. Login đặt cookie HttpOnly/SameSite=Strict, không trả token ra browser JSON; request tiếp theo forward bearer theo cookie. Cookie Secure cấu hình bằng AIWM_SESSION_COOKIE_SECURE, bật khi frontend HTTPS.
 
-- **Status:** READY; Scope: Health / Frontend Connectivity; Caller: frontend hoặc Postman.
-- **Auth:** không có browser token.
-- **Request:** `{{frontend_url}}/api/aiwm-health`, không body.
-- **Response:** HTTP 200, `{"status":"ok"}` nếu CP /healthz HTTP success; `{"status":"unreachable"}` nếu fetch lỗi/non-OK. Không data envelope.
-- **Flow/source:** `src/app/api/aiwm-health/route.ts::GET → src/config/server.ts::getServerConfig → fetch(CP /healthz)`.
-- **Test:** bật enable_frontend_test, chạy BFF Health. Chỉ HTTP 200 chưa đủ, phải assert body status=ok.
-- **Kiểm tra sau:** BFF GET Servers.
-- **Error:** handler catch upstream error rồi vẫn 200/unreachable; Next chưa chạy thì connection error.
-
-### `GET/POST /api/aiwm/[...path]`
-
-- **Status:** PARTIAL; chưa có user authentication.
-- **Scope:** Frontend API Proxy / Security / 14 business scopes được whitelist.
-- **Caller:** Browser/Postman tới frontend; cần Next và CP chạy.
-- **Auth:** Next tự lấy AIWM_API_TOKEN phía server. POST nếu có Origin phải khớp Host; không yêu cầu bearer browser.
-- **Request:** thay `/api/v1/` của **14 business endpoints** bằng `/api/aiwm/`, giữ method/query/body. Ví dụ GET /api/aiwm/servers, POST /api/aiwm/jobs.
-- **Response:** body/status từ CP; own errors có error.code/message. Không proxy probes/Agent/Docker endpoints.
-- **Flow/source:** `src/app/api/aiwm/[...path]/route.ts::proxy → proxy-policy.ts::allowedPublicRoute/allowedMutationOrigin → config/server.ts → fetch(CP)`.
-- **Test:** BFF GET Servers dùng No Auth nhận 200 khi token Next đúng; POST Jobs với Origin cố ý khác host nhận 403 trước khi tạo Job.
-- **Kiểm tra sau:** đọc Jobs để kiểm tra negative POST không tạo Job; xem config Next nếu proxy lỗi.
-- **Errors:** 404 ngoài whitelist; 403 Origin sai; 413 body quá lớn; 503 thiếu Next token; 502 network/timeout/config URL/fetch lỗi; có thể forward 400/401/... từ CP.
-- Chỉ export GET/POST; method khác do Next xử lý mặc định. Không xem BFF là login/token-validation endpoint.
+Chưa login → 401; Origin mutation khác host → 403; route ngoài whitelist → 404; network/timeout → 502. Logout thành công xóa cookie; nếu upstream mất kết nối, UI báo chưa logout được thay vì giả đã revoke session.
 
 ## 11. Security test cases và error response guide
 
@@ -1556,7 +1322,7 @@ POST /api/v1/agents/{agentID}/commands/{commandID}/ack
 | ACK lặp | ACK Stop true rồi false cùng ID vẫn SUCCEEDED | CP riêng/Agent fixture |
 | Failed Start | ACK false → Command/Job FAILED, reservation RELEASED | CP riêng/Agent fixture |
 | BFF cross-origin | POST Jobs Origin khác Host → 403 | Next |
-| Expired token | **Không có case**, vì không implement TTL/JWT expiry | Không invent behavior |
+| Expired token | **Session hết hạn hoặc logout phải 401**, không dùng JWT | Không invent behavior |
 
 ### HTTP codes có trong source
 
@@ -1576,7 +1342,7 @@ POST /api/v1/agents/{agentID}/commands/{commandID}/ack
 | 422 | INSUFFICIENT_GPU mapping trong respond | Mapping tồn tại; normal submit/run-once thiếu GPU không trả 422, Job vẫn QUEUED. Không có request expect-422 giả. |
 | 500 | INTERNAL | Persistence/disk/panic, client nhận generic message. Không cần cố làm hỏng state file để test. |
 | 502 | CONTROL_PLANE_UNREACHABLE | BFF fetch CP thất bại. |
-| 503 | CONFIGURATION | BFF thiếu token; CP thiếu token fail startup, không phục vụ 503. |
+| 503 | CONFIGURATION | Không dùng CONFIGURATION/thiếu bearer cấu hình trong đường session mới; thiếu cookie trả 401. |
 
 Normal error ví dụ:
 
@@ -1613,37 +1379,19 @@ Assertions ưu tiên HTTP code + error.code; message phụ thuộc branch. Unkno
 | GET /agents/{id}/commands | Required | Không | Đã enroll, manual có thể lease | Không để lease; có để execute thật | Local check ở Start thật | Agent bearer |
 | POST /agents/{id}/commands/{cid}/ack | Required | Không | Đúng identity + command có thật | ACK JSON không gọi Docker tại CP | Không tại CP | Agent bearer |
 | GET Next /api/aiwm-health | Để body ok | Không | Không | Không nếu native | Không | None |
-| GET/POST Next /api/aiwm/... | Required + Next | Không | Theo business route | Theo route/Agent | Theo route/Agent | Next server token; Origin check cho POST |
+| GET/POST Next /api/aiwm/... | Required + Next | Không | Theo business route | Theo route/Agent | Theo route/Agent | Session cookie/bearer; Origin check cho POST |
 
 Không endpoint nào yêu cầu standalone database service hiện tại.
 
-## 13. Inconsistencies và limitations
+## 13. Giới hạn và kiểm chứng
 
-- **UI/API naming:** Workload dùng Job API, External là LEGACY. `origin=EXTERNAL` không bị validate lỗi mà trả [].
-- **OpenAPI required/enum vs Go:** decoder không enforce required tự động. `{}` ở drain thành false, `{}` ở ACK thành failure; invalid origin trả [], invalid poll limit default10. Không sửa behavior để làm đẹp spec.
-- **OpenAPI coverage:** health và một số Agent mutation success responses chỉ có description, thiếu schema body chi tiết. Source trả data.Server hoặc data.Command như mô tả từng endpoint.
-- **Auth harness vs production:** httpapi.New không Options có thể thiếu public middleware trong test; production cmd luôn truyền Options/require token.
-- **BFF:** chưa có user login/session. Health BFF có thể HTTP200 nhưng body unreachable; token Next không phải browser authentication.
-- **Readiness:** public Server GET/drain decorate schedulable, Agent heartbeat/inventory trả raw chưa decorate. GET GPU flat response thiếu freshness/readiness của Server. Trang frontend GPU inventory hiện đếm State=FREE cho ô “Sẵn sàng”, chưa xét offline/stale/drained, khác CP Summary.gpusFree; đã sửa mô tả quá rộng trong frontend-api-map.md.
-- **GPU accounting:** RELEASED chưa chắc FREE nếu active/unknown/unhealthy evidence còn. Counter occupied không chỉ actual utilization; StateReason có thể cũ ngay sau reserve.
-- **Scheduler:** thiếu GPU → queued reason, không normal422; run-once là mutation toàn queue, count0 có thể vì background cycle đã xử lý.
-- **Stop/reconciliation:** ACK Stop true chưa terminal; failed Stop ACK đưa RUNNING. STOPPING + missing chưa kiểm tra Start còn DELIVERED; happy-path Postman chưa chứng minh loại trừ race ở [Domain Model](DOMAIN_MODEL.md).
-- **Command GET:** poll có tác dụng lease, không dùng làm read-only inspector cho Agent thật. ACK chưa bắt buộc đã DELIVERED.
-- **Execution:** Sim không chạy image/argv; không kiểm chứng CUDA, real-container natural exit hay survival qua disconnect trên GPU vật lý.
-- Không có login/refresh/expiry, external mutation, workload CRUD riêng, GPU update, command-history read, policy CRUD hay explicit reconciliation API. Collection không tạo TODO endpoint cho các scope chưa có.
+Chỉ static inspection/implementation trong task mới. Chưa chạy Postman, PostgreSQL, migration, Go/Frontend build/test. Protocol fixture chứng minh JSON contract nếu người dùng chạy, không chứng minh Docker/NVML/CUDA thật.
 
-## 14. Kiểm chứng artifacts
-
-- Contract hiện tại: 21 backend route patterns; collection 94 request definitions.
-- Task allocation: **Newman 6.2.2, 25 requests / 51 assertions / 0 failures**, chỉ folder `Allocation - Policy Preview Submit` trên CP native riêng + inventory fixture; xác nhận placement và External vẫn protected.
-- Focused Go tests/vet/build và frontend 10 contract tests/lint/typecheck PASS. Không chạy lại Docker/full E2E/production frontend build.
-- Lượt API audit trước contract intent từng qua 69 requests/195 assertions; số đó **không là chứng nhận cho collection mới**. Existing Agent/E2E folders và demo scripts đã đổi request body; chưa chạy lại toàn bộ.
-- Environment mẫu trống credential; test không export token/response chứa secret. Manual protocol fixture không chứng minh Docker/NVML/CUDA thật.
-- [acceptance.py](../scripts/acceptance.py), [recovery.py](../scripts/recovery.py) dùng sau khi rebuild CP; recovery chỉ cho deployment demo riêng.
+Schema metadata ở store/postgres/001_metadata.sql, runtime vẫn gob. Test harness cũ có thể dùng httpapi.New không Identity; production aiwm-server bắt buộc nối Identity/PostgreSQL. Agent token chưa có expiry; session người dùng có TTL. Quota vẫn DEVELOPMENT_CONFIG, không quota ledger riêng từng org. Chưa có migration ownership runtime cũ.
 
 ## 15. API → Master Scope → Source
 
-21 backend endpoints dưới đây, cộng hai dòng transport Next riêng. Security là scope giao nhau; không cộng Register lần nữa như login API.
+Bảng dưới giữ mapping endpoint trước khi thêm metadata; auth/organizations/users/enrollments bổ sung ở mục 1–3, source httpapi/identity.go và application/identity.go.
 
 | API | Purpose | Scope | Caller | Auth | Main handler/service |
 |---|---|---|---|---|---|
