@@ -60,6 +60,15 @@ func (e *Engine) Version(ctx context.Context) (string, error) {
 	return result.Version, nil
 }
 
+func (e *Engine) Compatibility(ctx context.Context) (agent.RuntimeCompatibility,error) {
+	v,err:=e.client.ServerVersion(ctx,client.ServerVersionOptions{})
+	if err!=nil { return agent.RuntimeCompatibility{},err }
+	i,err:=e.client.Info(ctx,client.InfoOptions{})
+	if err!=nil { return agent.RuntimeCompatibility{},err }
+	_,nvidia:=i.Info.Runtimes["nvidia"]
+	return agent.RuntimeCompatibility{Version:v.Version,APIVersion:v.APIVersion,OS:v.Os,NVIDIARuntime:nvidia},nil
+}
+
 func (e *Engine) ListContainers(ctx context.Context) ([]agent.RuntimeContainer, error) {
 	result, err := e.client.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {

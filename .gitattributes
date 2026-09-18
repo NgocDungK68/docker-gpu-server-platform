@@ -1,0 +1,4 @@
+scripts/build-agent-release.sh text eol=lf
+scripts/install-agent-linux.sh text eol=lf
+scripts/test-agent-install.sh text eol=lf
+AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/deploy/agent/aiwm-agent.service text eol=lf

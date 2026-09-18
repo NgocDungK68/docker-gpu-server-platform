@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -65,10 +66,11 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.persistent = loaded
 	r.mu.Unlock()
 
+	attempt:=0
 	for {
 		err := r.docker.Ping(ctx)
 		if err == nil {
-			err = r.ensureRegistered(ctx, "")
+			err = r.ensureRegistered(ctx, loaded.AgentID)
 		}
 		if err == nil {
 			err = r.reportInventory(ctx)
@@ -80,8 +82,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(r.config.HeartbeatEvery):
+		case <-time.After(retryDelay(r.config.HeartbeatEvery,attempt)):
 		}
+		attempt++
 	}
 
 	r.logger.Info("AIWM agent started", "agent_id", r.identity().AgentID, "machine_id", r.config.MachineID)
@@ -96,8 +99,9 @@ func (r *Runner) Run(ctx context.Context) error {
 }
 
 func (r *Runner) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(r.config.HeartbeatEvery)
+	ticker := time.NewTimer(r.config.HeartbeatEvery)
 	defer ticker.Stop()
+	attempt:=0
 	for {
 		select {
 		case <-ctx.Done():
@@ -108,9 +112,11 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 			if errors.Is(err, ErrUnauthorized) {
 				err = r.ensureRegistered(ctx, identity.AgentID)
 			}
+			if err==nil && attempt>0 { err=r.reportInventory(ctx) }
 			if err != nil && !errors.Is(err, context.Canceled) {
 				r.logger.Warn("heartbeat failed", "error", err)
 			}
+			if err!=nil { ticker.Reset(retryDelay(r.config.HeartbeatEvery,attempt)); attempt++ } else { attempt=0; ticker.Reset(r.config.HeartbeatEvery) }
 		}
 	}
 }
@@ -147,16 +153,19 @@ func (r *Runner) inventoryLoop(ctx context.Context) {
 }
 
 func (r *Runner) commandLoop(ctx context.Context) {
-	ticker := time.NewTicker(r.config.CommandPollEvery)
+	ticker := time.NewTimer(r.config.CommandPollEvery)
 	defer ticker.Stop()
+	attempt:=0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := r.pollAndExecute(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			err:=r.pollAndExecute(ctx)
+			if err != nil && !errors.Is(err, context.Canceled) {
 				r.logger.Warn("command poll failed", "error", err)
 			}
+			if err!=nil { ticker.Reset(retryDelay(r.config.CommandPollEvery,attempt)); attempt++ } else { attempt=0; ticker.Reset(r.config.CommandPollEvery) }
 		}
 	}
 }
@@ -200,7 +209,8 @@ func (r *Runner) pollAndExecute(ctx context.Context) error {
 	identity := r.identity()
 	commands, err := r.client.PollCommands(ctx, identity.AgentID, identity.AgentToken, r.config.CommandLimit)
 	if errors.Is(err, ErrUnauthorized) {
-		return r.ensureRegistered(ctx, identity.AgentID)
+		if err:=r.ensureRegistered(ctx, identity.AgentID); err!=nil { return err }
+		return r.reportInventory(ctx)
 	}
 	if err != nil {
 		return err
@@ -289,4 +299,12 @@ func (r *Runner) remember(commandID string, ack agentv1.CommandAckRequest) error
 
 func (r *Runner) saveLocked() error {
 	return r.state.Save(r.persistent)
+}
+
+// retryDelay giới hạn 60 giây, jitter nửa trên để tránh các Agent retry đồng loạt.
+func retryDelay(base time.Duration,attempt int) time.Duration {
+	if base<time.Second { base=time.Second }
+	for i:=0; i<attempt && base<30*time.Second; i++ { base*=2 }
+	if base>60*time.Second { base=60*time.Second }
+	return base/2+time.Duration(rand.Int64N(int64(base/2)+1))
 }

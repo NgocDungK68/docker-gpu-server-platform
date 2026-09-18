@@ -16,7 +16,7 @@ func TestCommitAssignmentIsAtomic(t *testing.T) {
 	store := New()
 	now := time.Now().UTC()
 	_, err := store.UpsertServer(ctx, domain.Server{
-		ID: "server-1", MachineID: "machine-1", Name: "server-1", Status: domain.ServerOnline,
+		OrganizationID: "test-org", ID: "server-1", MachineID: "machine-1", Name: "server-1", Status: domain.ServerOnline,
 		LastHeartbeatAt: now, InventoryReceivedAt: now,
 		GPUs: []domain.GPU{{UUID: "gpu-1", Healthy: true, State: domain.GPUFree}},
 	})
@@ -24,7 +24,7 @@ func TestCommitAssignmentIsAtomic(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"job-1", "job-2"} {
-		if err := store.CreateJob(ctx, domain.Job{ID: id, Status: domain.JobQueued, Resources: domain.ResourceRequest{GPUCount: 1}, CreatedAt: now}); err != nil {
+		if err := store.CreateJob(ctx, domain.Job{OrganizationID: "test-org", ID: id, Status: domain.JobQueued, Resources: domain.ResourceRequest{GPUCount: 1}, CreatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -87,7 +87,10 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 	result := make([]candidate, 0)
 	online, labels, model, healthy, available, vram := false, false, false, false, false, false
 	external, unknown := false, false
+	sameOrganization := false
 	for _, server := range servers {
+		if !domain.SameOrganization(job.OrganizationID,server.OrganizationID) { continue }
+		sameOrganization = true
 		if !server.Schedulable(now, s.offlineAfter) {
 			continue
 		}
@@ -122,6 +125,8 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 	}
 	reason := "insufficient GPU count on one server"
 	switch {
+	case !sameOrganization:
+		reason = "no server satisfies organization ownership"
 	case !online:
 		reason = "no online agent with fresh inventory (offline, drained or inventory unavailable)"
 	case !labels:

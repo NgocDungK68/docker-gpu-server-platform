@@ -6,6 +6,7 @@ services:
       service: agent-t4
     environment:
       AIWM_AGENT_MACHINE_ID: sim-unknown
+      AIWM_ENROLLMENT_TOKEN: ${AIWM_UNKNOWN_ENROLLMENT_TOKEN:-}
       AIWM_AGENT_NAME: fake-server-unknown
       AIWM_AGENT_LABELS: site=unknown,pool=simulation
       MOCK_NVML_CONFIG: /profiles/a100-unknown.yaml
@@ -17,6 +18,7 @@ services:
       service: agent-t4
     environment:
       AIWM_AGENT_MACHINE_ID: sim-unhealthy
+      AIWM_ENROLLMENT_TOKEN: ${AIWM_UNHEALTHY_ENROLLMENT_TOKEN:-}
       AIWM_AGENT_NAME: fake-server-unhealthy
       AIWM_AGENT_LABELS: site=unhealthy,pool=simulation
       MOCK_NVML_CONFIG: /profiles/a100-unhealthy.yaml

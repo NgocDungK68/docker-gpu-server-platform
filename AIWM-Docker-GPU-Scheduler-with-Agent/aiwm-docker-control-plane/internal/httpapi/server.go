@@ -21,7 +21,10 @@ type Server struct {
 }
 
 // Options defines public API credentials separately from per-agent authentication.
-type Options struct{ PublicAPIToken string }
+type Options struct {
+	PublicAPIToken string // Chỉ tương thích test harness cũ; production dùng Identity.
+	Identity *application.IdentityService
+}
 
 func New(controlPlane *application.ControlPlane, logger *slog.Logger, corsOrigins []string, options ...Options) *Server {
 	server := &Server{controlPlane: controlPlane, logger: logger}
@@ -53,7 +56,12 @@ func New(controlPlane *application.ControlPlane, logger *slog.Logger, corsOrigin
 
 	var handler http.Handler = mux
 	if len(options) > 0 {
-		handler = publicAuth(options[0].PublicAPIToken, handler)
+		if options[0].Identity != nil {
+			mountIdentity(mux,options[0].Identity)
+			handler = sessionAuth(options[0].Identity,handler)
+		} else {
+			handler = publicAuth(options[0].PublicAPIToken, handler)
+		}
 	}
 	handler = bodyLimit(handler)
 	handler = cors(corsOrigins, handler)
@@ -76,6 +84,9 @@ func (s *Server) ready(writer http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) summary(writer http.ResponseWriter, request *http.Request) {
 	result, err := s.controlPlane.Summary(request.Context())
+	for i := range result.RecentEvents {
+		result.RecentEvents[i].Reason = publicReason(result.RecentEvents[i].Reason)
+	}
 	respond(writer, result, err, http.StatusOK)
 }
 
@@ -247,6 +258,8 @@ func respond(writer http.ResponseWriter, data any, err error, successStatus int)
 		status, code = http.StatusBadRequest, "INVALID_INPUT"
 	case errors.Is(err, domain.ErrUnauthorized):
 		status, code = http.StatusUnauthorized, "UNAUTHORIZED"
+	case errors.Is(err, domain.ErrForbidden):
+		status, code = http.StatusForbidden, "FORBIDDEN"
 	case errors.Is(err, domain.ErrNotFound):
 		status, code = http.StatusNotFound, "NOT_FOUND"
 	case errors.Is(err, domain.ErrConflict), errors.Is(err, domain.ErrStaleInventory), errors.Is(err, domain.ErrJobNotStoppable):

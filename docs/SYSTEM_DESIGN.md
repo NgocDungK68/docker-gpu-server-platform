@@ -1,6 +1,6 @@
 # Thiết kế hệ thống AIWM
 
-Tài liệu mô tả source hiện tại, đối chiếu tĩnh ngày 10/09/2026. Đây là thiết kế đã triển khai cùng các giới hạn quan sát được; không phải đề xuất thêm component. Không chạy build/test/runtime trong lần viết tài liệu này.
+Tài liệu mô tả source hiện tại, cập nhật Organization/auth qua inspection tĩnh ngày 17/09/2026. Đây là thiết kế đã triển khai cùng các giới hạn quan sát được; không phải đề xuất thêm component. Không chạy build/test/runtime trong lần viết tài liệu này.
 
 ## Problem, Goal và Core constraint
 
@@ -33,58 +33,69 @@ Domain/control state nằm trong [domain][model] và repository; actual state đ
 | Public input | [CreateJobRequest][dto] + [AllocationResources/AllocationIntent][allocation-model]; [validateJobRequest][validation] và `prepareJob` kiểm tra, normalize, resolve constraint. |
 | Public output | [JobView/publicJob][job-view] che giá trị environment; `PolicyDecision.AuxiliaryScore` và `ResourceRequest.ResolvedModels` không serialize JSON. Server/GPU/Container chủ yếu dùng domain trực tiếp. |
 | Agent protocol | [agentprotocol/v1/types.go][wire]; [inventoryToDomain][protocol-map] validate wire report; `ControlPlane.ReportInventory` gán `ReceivedAt` theo đồng hồ CP. |
-| Persistence đang chạy | [memory.Snapshot][snapshot] version 1 chứa domain maps; [durable.Store][durable] encode gob. Không có ORM/DB entity mapping đang chạy. SQL trong `migrations` là target schema chưa được startup sử dụng. |
+| Persistence đang chạy | [memory.Snapshot][snapshot] version 1 chứa domain maps; [durable.Store][durable] encode gob. Business metadata dùng PostgreSQL qua store/postgres; 001_metadata.sql chạy bằng --migrate. SQL runtime trong migrations/ vẫn chưa dùng; không migrate Job/Assignment/Command sang PostgreSQL. |
 | Frontend | [types.ts][fe-types], [api-client.ts][fe-client] và BFF sử dụng public contract; không sở hữu policy, reservation hoặc state transitions. |
 
 Chi tiết từng field, invariant và test liên quan: [DOMAIN_MODEL](DOMAIN_MODEL.md). Cách chạy/demo/test Windows và WSL: [README](../README.md), [WINDOWS-WSL](WINDOWS-WSL.md).
 
-## D1 — System architecture
+## Phát hành tập trung và triển khai Agent
 
 ~~~mermaid
 flowchart LR
-    U["User"] --> UI["Frontend"]
-    UI --> BFF["Next.js BFF"]
-    subgraph CP["Control Plane process"]
-        API["httpapi"]
-        APP["application.ControlPlane"]
-        POL["policy.Engine"]
-        CAT["capability.Catalog"]
-        SCH["application.Scheduler"]
-        REP["ports.Repository"]
-        MEM["memory.Store<br/>Job / Assignment / Command<br/>inventory reconciliation"]
-        DUR["durable.Store"]
-        API --> APP
-        APP -->|Evaluate / Order| POL
-        APP -->|Resolve| CAT
-        APP -->|Plan| SCH
-        APP --> REP
-        REP --> DUR
-        DUR --> MEM
-        DUR --> DISK[("gob snapshot")]
-    end
-    BFF -->|Public API| API
-    subgraph AG["Agent process: production hoặc sim"]
-        RUN["agent.Runner"]
-        CORE["InventoryCollector<br/>CommandExecutor"]
-        DOCK["DockerRuntime"]
-        GPU["gpu.Reader"]
-        RUN --> CORE
-        CORE --> DOCK
-        CORE --> GPU
-    end
-    RUN -->|register / heartbeat / inventory / poll / ACK| API
-    API -.->|response của poll: commands| RUN
-    DOCK -->|production| REAL["Docker Engine"]
-    DOCK -->|sim| SIM["simulator.Runtime"]
-    GPU -->|production| NV["Driver NVML + GPU"]
-    GPU -->|sim| MOCK["NVIDIA mock NVML library"]
+    DEV["AIWM team / CI"] -->|"Build một lần, default CP URL"| R["Generic Agent release<br/>binary + installer + checksum"]
+    R --> A["VTT-01<br/>Enrollment A"]
+    R --> B["VTT-02<br/>Enrollment B"]
+    R --> C["VDS-01<br/>Enrollment C"]
+    R --> D["VTNET-01<br/>Enrollment D"]
+    A & B & C & D -->|"Register MachineID + token riêng"| CP["Control Plane"]
+    CP --> M["Enrollment → Server → Organization"]
 ~~~
 
-`ControlPlane.Queue` lấy queued Jobs từ repository rồi nhờ Policy Engine sắp thứ tự. Reservation, command lease/ACK và reconciliation inventory là mutation của repository; không có broker, reservation service hay reconciliation service riêng. Background `Reconcile` chỉ đánh dấu server stale; D9 chỉ rõ nơi cập nhật lifecycle theo container.
+Organization không compile vào Agent. GPU ownership suy ra qua Server. ADMIN cấp enrollment riêng qua UI hoặc scripts/agent-admin.py; không dùng chung token cho cả đơn vị. Binary là production cmd/aiwm-agent, CGO/NVML thật, không kèm mock library hoặc enrollment.
 
-Production và simulator dùng cùng `Runner`, `InventoryCollector`, `CommandExecutor`, HTTP client, file state và `gpu.New`. Simulator thay Docker boundary bằng `simulator.Runtime`; cả hai vẫn gọi cùng NVML adapter, nhưng simulator nạp NVIDIA mock shared library. PID resolver của simulator lấy từ runtime mô phỏng.
+~~~mermaid
+flowchart LR
+    FE["Browser / Frontend BFF"] --> CP["Control Plane Host<br/>HTTP(S) public + Agent API"]
+    CP --> PG[("PostgreSQL metadata")]
+    CP --> RT[("Runtime snapshot")]
+    A["Linux GPU host<br/>Agent + config/state"] -->|"Register, heartbeat, inventory, poll, ACK"| CP
+    CP -.->|"Command trong poll response"| A
+    A --> DO["Docker Engine<br/>Managed + Existing containers"]
+    A --> NV["go-nvml → NVML / NVIDIA Driver → GPU"]
+~~~
 
-Nguồn: [CP entrypoint][cp-main], [ControlPlane][cp], [Repository][ports], [Agent production][agent-main], [Agent sim][sim-main], [simulator][sim].
+URL: AIWM_CONTROL_PLANE_URL > ReleaseControlPlaneURL > development localhost. CP/Console bind loopback mặc định; AIWM_CP_BIND_HOST/AIWM_CONSOLE_BIND_HOST cho phép expose interface phục vụ deployment. PostgreSQL vẫn loopback. Repo không tự dựng reverse proxy/TLS.
+
+GPU host nhận release, installer và token; không clone source hoặc build Go. Installer không thay Docker/driver, không dừng containers. Service restart chỉ tác động Agent; MachineID/state mismatch phải re-onboard có chủ đích. Hướng dẫn [Real Deployment và E2E](TESTING_RUNBOOK.md); chưa chứng nhận execution trên GPU vật lý trong phiên laptop.
+
+## D1 — Kiến trúc nhiều Organization
+
+~~~mermaid
+flowchart LR
+    U["User"] --> FE["Frontend / BFF"]
+    FE -->|"Session HTTP + organization context"| CP["Go Control Plane"]
+    CP --> META["IdentityService / MetadataRepository"]
+    META --> PG[("PostgreSQL<br/>Organization / User / Session<br/>Enrollment / ServerOwnership")]
+    CP --> POL["Policy / Queue"]
+    POL --> ORG["Organization hard filter"]
+    ORG --> SCH["Resource filters / Scheduler"]
+    SCH --> RT[("memory + durable gob<br/>Job / Assignment / Command / inventory")]
+    RT --> OWN["Server thuộc Organization"]
+    AG["Agent trên Server"] -->|"register / heartbeat / inventory / poll / ACK"| CP
+    CP -.->|"command trong poll response"| AG
+    OWN -.->|"AgentID = Server.ID"| AG
+    AG --> D["Docker Engine"]
+    AG --> N["go-nvml / NVML"]
+    D --> G["GPU vật lý thuộc Server"]
+    N --> G
+~~~
+
+Organization là ownership boundary, không phải pool vật lý mới. Một Job chỉ dùng nguyên GPU trên một Server cùng organization. Preview và reservation commit cùng kiểm tra boundary; injected SchedulingPolicy chỉ score các candidate đã lọc.
+
+Metadata dùng PostgreSQL qua `ports.MetadataRepository`; runtime scheduling vẫn dùng `ports.Repository` và durable gob một writer. Không có broker hoặc transaction phân tán giữa hai store. Domain/application giữ business logic; PostgreSQL/Docker/NVML/HTTP là adapters. Agent production/sim dùng cùng core và NVML adapter; sim nạp mock library và thay DockerRuntime bằng `simulator.Runtime`.
+
+Nguồn: `internal/domain/organization.go`, `application/{identity,controlplane,allocation,scheduler}.go`, `store/postgres`, `cmd/aiwm-server/main.go`.
+
 
 ## D2 — Agent internal architecture
 
@@ -136,51 +147,39 @@ Report của Agent chưa tự tính đầy đủ `RESERVED/ALLOCATED/OCCUPIED_LE
 | Heartbeat, report, poll | [runner.go][runner] — ba loops; [client.go][agent-client] — HTTP outbound |
 | Commands | [executor.go][executor] — `Execute`; Docker adapter chỉ start/stop managed |
 
-## D3 — Agent startup / register / discovery
+## D3 — Enrollment, startup và discovery
 
 ~~~mermaid
 sequenceDiagram
-    participant M as aiwm-agent main
-    participant D as dockerengine.Engine
-    participant N as gpu.Reader
-    participant R as Runner
-    participant F as FileStore
-    participant C as InventoryCollector
-    participant A as Control Plane
-    M->>M: agentconfig.Load
-    M->>D: New(local endpoint)
-    M->>N: gpu.New / nvml.Init
-    M->>R: compose collector, client, executor, state, Run
-    R->>F: Load identity, sequence, processed results
-    R->>R: kiểm tra MachineID
-    loop startup đến khi thành công hoặc context bị hủy
-        R->>D: Ping
-        opt chưa có AgentID
-            R->>A: POST /api/v1/agents/register
-            A-->>R: AgentID + AgentToken
-            R->>F: Save identity
-        end
-        R->>F: tăng và Save InventorySequence
-        R->>C: Snapshot(sequence)
-        C->>D: ListContainers
-        C->>N: Snapshot GPUs / processes
-        C->>D: Version
-        C->>C: correlation + discoverHost + report
-        C-->>R: InventoryReport
-        R->>A: PUT /api/v1/agents/{agentID}/inventory
-        A-->>R: inventory được chấp nhận hoặc lỗi
-    end
-    R->>R: khởi chạy heartbeatLoop, inventoryLoop, commandLoop
-    R->>D: WatchContainerEvents trong inventoryLoop
+    actor U as ADMIN / ORGANIZATION_USER
+    participant CP as Control Plane
+    participant PG as PostgreSQL metadata
+    participant A as Agent
+    participant D as Docker / NVML
+    U->>CP: Login rồi POST enrollments
+    CP->>CP: Derive organization từ Principal (ADMIN được chọn)
+    CP->>PG: Lưu enrollment + token hash + ServerID
+    CP-->>U: Enrollment token (hiển thị một lần)
+    U->>A: Cấu hình token trên Linux server
+    A->>D: Preflight chỉ đọc
+    A->>A: Load local state và verify MachineID
+    A->>CP: Register machineId + enrollment token
+    CP->>PG: Khóa enrollment, bind machine/server/org
+    PG-->>CP: ServerOwnership bất biến
+    CP->>CP: Upsert runtime, reset freshness
+    CP-->>A: AgentID + AgentToken
+    A->>A: Persist credential và inventory sequence
+    A->>D: FULL inventory
+    A->>CP: PUT inventory
+    CP->>CP: Reconcile, normalize occupancy, fresh readiness
 ~~~
 
-**Register diễn ra trước inventory đầu tiên trong `Runner.Run`**, khác với flow giả định “discover tất cả rồi register”. Agent đã có identity thì thử dùng lại; nếu heartbeat/report/poll nhận 401, `ensureRegistered` đăng ký lại. Khi report gặp 401, Agent gửi lại report sau khi nhận token mới. CP dùng MachineID để giữ Server.ID và reset inventory freshness/version khi re-enroll.
+Không nhập GPU thủ công và không tin organization từ Agent. `RegisterRequest` không có organizationId; name/labels authoritative lấy từ enrollment. Token chưa bind hết hạn sau 24 giờ. Sau bind, chỉ cùng machine được register lại cho đến khi revoke; token phải được giữ an toàn cho restart/re-auth. Revoke enrollment không thu hồi Agent token đã cấp hoặc dừng workload.
 
-Vòng startup thử lại theo `HeartbeatEvery` khi Ping/register/report lỗi; các loops chỉ bắt đầu sau một report thành công. Lỗi load state, MachineID không khớp hoặc lỗi khởi tạo NVML ở main kết thúc process. Chế độ `--check` chỉ Ping + Snapshot rồi thoát, không register.
+Production `agent.Preflight` đọc OS/architecture/kernel/cgroup, truy cập Docker socket/API/version/info, runtime nvidia, NVML và GPU discovery. Non-Linux → UNSUPPORTED; thiếu Docker/NVML/GPU/runtime evidence → DEGRADED và startup dừng, không fake inventory rỗng. SUPPORTED là điều kiện nền tảng, không thay thế GPU health/occupancy/freshness. `--check` không cần token và không register/mutate container. Chưa có probe thực thi CUDA/CDI-only; xem [TESTING_RUNBOOK](TESTING_RUNBOOK.md).
 
-Simulator có bước riêng **trước Runner**: `gpu.New → Reader.Snapshot → simulator.NewRuntime` để seed/load existing containers theo UUID của mock NVML. Sau đó dùng đúng startup/loops trên. Ngắt Agent không có bước stop/delete containers.
+Metadata bind commit trước Upsert durable; nếu ghi runtime lỗi, retry cùng token/machine dùng cùng ServerID. Không có atomic commit xuyên PostgreSQL/gob. Dữ liệu cũ thiếu org không tự adopt/chuyển ownership.
 
-Nguồn: [production main][agent-main], [sim main][sim-main], [Runner.Run/ensureRegistered/reportInventory][runner], [FileStore][agent-state], [RegisterAgent][cp].
 
 ## D4 — Existing workload discovery và occupancy
 
@@ -222,64 +221,44 @@ CP chỉ lưu/cập nhật inventory External. External bị chủ sở hữu st
 
 Nguồn: [classifyContainer/Snapshot][inventory], [fromInspect/StopManagedJob][docker], [inventoryToDomain][protocol-map], [normalizeGPUState][accounting]. Ownership và PID attribution có giới hạn ở phần Design observations.
 
-## D5 — Create request → GPU placement → container
+## D5 — Submit đến container và release
 
 ~~~mermaid
 sequenceDiagram
-    participant U as User / Frontend
-    participant B as Next.js BFF
-    participant H as httpapi
-    participant C as ControlPlane
-    participant P as policy.Engine
+    actor U as User / Frontend
+    participant H as HTTP / application
+    participant P as Policy / Queue
     participant S as Scheduler
-    participant R as Repository
+    participant R as Runtime repository
     participant A as Agent
     participant D as Docker Engine
-    U->>B: POST /api/aiwm/jobs với intent + resources
-    B->>H: POST /api/v1/jobs + public bearer
-    H->>C: CreateJob(CreateJobRequest)
-    C->>C: prepareJob: validate + catalog.Resolve
-    C->>P: Evaluate
-    C->>R: ListServers
-    C->>S: matchJob / Plan trên snapshot
-    C->>R: CreateJob với Status QUEUED
-    H-->>B: 201 JobView
-    B-->>U: Job đã vào queue
-    Note over C,R: Scheduler ticker hoặc POST scheduler/run-once
-    C->>R: ListQueuedJobs
-    C->>P: Order: evaluate lại và xếp queue
-    C->>R: ListServers
-    C->>S: Plan: filter, score, select
-    S-->>C: Placement hoặc ErrInsufficientGPU
-    alt có placement
-        C->>R: CommitAssignment + START_CONTAINER
-        R-->>C: ASSIGNED + RESERVED + PENDING đã commit
-        A->>H: GET commands: lease
-        H-->>A: START_CONTAINER + exact GPUUUIDs
-        A->>A: GPUsAvailable với snapshot local mới
-        A->>D: StartManagedContainer
-        D-->>A: ContainerID hoặc lỗi
-        A->>A: lưu processed result trước ACK
-        A->>H: POST command ACK
-        A->>H: PUT inventory sau command
-        H->>C: ReportInventory
-        C->>R: ReplaceInventory + reconcile + normalize
-    else chưa đủ GPU
-        C->>R: giữ QUEUED, cập nhật StatusReason
-    end
-    U->>B: GET Job / inventory qua API client
-    B->>H: public read
-    H-->>B: JobView / inventory
-    B-->>U: kết quả public read
+    U->>H: Submit Job qua session
+    H->>H: Derive OrganizationID, validate intent/resources
+    H->>P: Evaluate admission
+    H->>R: Create QUEUED (submit không reserve)
+    P->>P: Cycle Order: lane, Necessity, aux, time, ID
+    P->>S: Job + snapshot
+    S->>S: SAME organization trước resource filters/scoring
+    S-->>H: Placement hoặc chưa đủ GPU
+    H->>R: CommitAssignment: org/resource recheck, reserve + Job + START
+    A->>H: Poll commands
+    H-->>A: START_CONTAINER
+    A->>A: Kiểm tra local GPU occupancy
+    A->>D: Inspect image; pull nếu thiếu; create/start exact GPU UUIDs
+    D-->>A: ContainerID hoặc lỗi
+    A->>A: Persist processed result
+    A->>H: ACK + FULL inventory
+    H->>R: Reconcile → RUNNING hoặc FAILED/release
+    U->>H: Stop Job trong scope (hoặc Docker tự exit)
+    A->>D: STOP khi có command; không điều khiển External
+    A->>H: Inventory actual terminal
+    H->>R: Terminal Job + RELEASED, recompute GPU blockers
 ~~~
 
-Đây là flow submit hợp lệ; input lỗi bị chặn trước `CreateJob`. `TRAINING/INFERENCE`, Necessity, reason, systemImportance, neededAt, TTL và GPU requirements được backend validate. User không gửi scheduler/server/GPU/priority score; JSON có field ngoài DTO bị từ chối.
+Scheduler thiếu tài nguyên **trong đơn vị** thì giữ QUEUED và thử Job sau; không fallback sang organization khác. Bốn strategy/công thức giữ nguyên. Submit đánh giá lại snapshot, không sử dụng preview như reservation.
 
-`Policy Engine` đánh giá business lane và thứ tự phục vụ; cả `AUTO_ELIGIBLE` lẫn `COMPETITIVE` vẫn có thể được scheduler xét. Chưa có approval workflow riêng hoặc hard rejection vì vượt quota. `Scheduler` chỉ chọn nơi chạy đáp ứng physical constraints. Không đưa auxiliary policy score vào placement score.
+ACK START thành công thường chuyển ASSIGNED → STARTING; inventory có thể tới trước ACK và đưa Job thẳng RUNNING. Pull/create/start lỗi trả failed ACK → Command FAILED, Job FAILED và release logical reservation. Khi mất liên lạc chưa biết kết quả, giữ reservation; không free bằng timeout heartbeat. Stop ACK không đủ release: inventory/reconciliation quyết định terminal. GPU chỉ FREE khi không còn blocker health/external/unknown/managed/reservation.
 
-Agent chủ động poll; CP không mở kết nối vào Agent để push command. Start guard đọc inventory local mới trước khi tạo container; Docker adapter dùng `DeviceRequests.Driver=nvidia` và exact `DeviceIDs` từ Assignment, gửi CPU/RAM thành Docker limits. Container cùng managed Job đã tồn tại được tái sử dụng cho idempotency; lỗi launch trả failed ACK. Diagram biểu diễn flow tuần tự thông thường; inventory/event loop độc lập có thể thấy container active **trước ACK**.
-
-Nguồn: [form][fe-form], [client][fe-client], [BFF][bff], [httpapi][http], [CreateJob/Queue/ScheduleOnce][cp], [executor][executor], [Docker adapter][docker].
 
 ## D6 — Preview vs submit
 
@@ -308,6 +287,8 @@ Form tải catalog qua `GET /api/v1/jobs/options`; `allocationInput` đổi gi�
 Nguồn: [allocation.go][allocation-app] — `prepareJob/PreviewJob/matchJob`; [form][fe-form], [form-schema][fe-schema], [preview panel][fe-preview].
 
 ## D7 — Scheduler internal flow
+
+Trước mọi resource filter/scoring, Scheduler.filter chạy SameOrganization(Job.OrganizationID, Server.OrganizationID). Server khác đơn vị không được dùng để xây candidate/recommendation.
 
 ~~~mermaid
 flowchart TD
@@ -357,6 +338,8 @@ Các boundary thay policy/thuật toán hiện có: `Options.Policy` nhận `pol
 Nguồn: [scheduler.go][scheduler], [policy.Engine][policy], [capability.Catalog][catalog], [ResourceRequest.Matches][allocation-model], [ScheduleOnce][cp]. Chi tiết coefficients: [SCHEDULER](SCHEDULER.md).
 
 ## D8 — Reservation và concurrency
+
+CommitAssignment kiểm tra SameOrganization trước resource checks và mutation dưới runtime lock. PostgreSQL chỉ lưu metadata; atomic reserve + Job + command vẫn thuộc memory/durable transaction.
 
 ~~~mermaid
 flowchart TD
@@ -434,31 +417,34 @@ Worker `runReconciler → ControlPlane.Reconcile` **chỉ** gọi `MarkStaleServ
 
 Nguồn: [Runner.inventoryLoop/pollAndExecute][runner], [ReportInventory/Reconcile][cp], [ReplaceInventory][store], [reconcileObservedLocked][lifecycle].
 
-## D10 — Failure handling
+## D10 — Mất liên lạc và reconnect
 
 ~~~mermaid
-flowchart TD
-    LOSS["Không nhận heartbeat và inventory mới"] --> STALE["LastHeartbeatAt quá OfflineAfter"]
-    STALE --> OFF["MarkStaleServers: OFFLINE"]
-    OFF --> BLOCK["Server.Schedulable=false<br/>không placement mới"]
-    CPDOWN["Control Plane unavailable"] --> RETRY["Agent HTTP lỗi<br/>loops tiếp tục thử"]
-    RETRY --> NOPOLL["Không lấy được command mới"]
-    OFF --> KEEP["Giữ Job / reservation / last-known"]
-    NOPOLL --> RUNTIME["Không phát sinh stop/cleanup<br/>Docker runtime độc lập"]
-    KEEP --> RUNTIME
-    BACK["Kết nối trở lại"] --> ID["Dùng lại identity<br/>re-enroll nếu 401"]
-    ID --> SNAP["Snapshot Docker + NVML mới"]
-    SNAP --> REPORT["Inventory được chấp nhận<br/>reconcile + freshness"]
-    REPORT --> ELIG["Không drain + server fresh<br/>GPU healthy/free và match mới được chọn"]
+sequenceDiagram
+    participant A as Agent
+    participant CP as Control Plane
+    participant D as Docker daemon / containers
+    A--xCP: Heartbeat không tới (crash / host / network)
+    CP->>CP: Timeout → OFFLINE, chặn placement mới
+    Note over CP: Giữ last-known inventory, Job, Assignment, Reservation
+    Note over D: Container tiếp tục chạy độc lập với Agent/CP
+    A->>A: Restart: load state, verify MachineID, giữ sequence/history
+    A->>CP: Re-register nếu restart/credential bị từ chối
+    CP-->>A: Identity/token; cần inventory mới
+    A->>D: FULL inventory
+    A->>CP: Gửi snapshot với sequence mới
+    CP->>CP: Reconcile actual/desired, normalize occupancy
+    CP->>CP: Chỉ schedulable khi freshness/health/org/drain hợp lệ
 ~~~
 
-Inventory được chấp nhận cũng cập nhật `LastHeartbeatAt`; riêng việc endpoint heartbeat thất bại chưa đủ làm OFFLINE nếu report vẫn tới. Ngược lại, heartbeat thành công nhưng inventory cũ khiến server **không schedulable dù Status ONLINE**. `Server.Schedulable` kiểm tra freshness trực tiếp, nên scheduler không cần đợi timer đổi enum OFFLINE.
+Agent startup/heartbeat/command poll dùng exponential backoff với jitter nửa trên, cap 60 giây; inventory định kỳ giữ nhịp cấu hình, Docker event bursts debounce 500 ms. Mất event stream dùng periodic inventory làm fallback; chưa mở lại stream trong loop hiện tại.
 
-Agent không dừng container khi CP unreachable hoặc context shutdown. Command đã nhận có thể đang thực thi; mất CP không phải tín hiệu hủy workload. Mất kết nối không chứng minh host/Docker/GPU còn khỏe, chỉ chứng minh code quản lý không chủ động stop chúng. CP không tự release reservation hoặc chuyển workload sang host khác vì mất heartbeat.
+Heartbeat sau OFFLINE hoặc gap vượt timeout đặt inventory receipt về zero; heartbeat một mình không mở scheduling. Register/CP restore cũng reset freshness. Lease START cần server fresh; Stop và inventory/ACK tiếp tục theo guard lifecycle hiện có.
 
-CP restart dùng gob restore, đặt server OFFLINE và reset `InventoryReceivedAt`. Heartbeat có thể đổi status ONLINE/DRAINING nhưng vẫn cần inventory mới để placement. Agent giữ sequence và kết quả command đã xử lý trên local file; lease hết hạn cho phép redelivery, result được lưu trước ACK và ACK terminal lặp không áp hiệu ứng lần hai. Không có đảm bảo exactly-once cho toàn bộ crash window giữa Docker và filesystem.
+Không có cleanup khi Agent/CP disconnect. `Runner.Run` verify persisted MachineID trước đăng ký; sequence tăng và lưu trước snapshot. Process restart giữ Docker container, không tự stop/restart External. CP chỉ dùng heartbeat không thể phân biệt Agent crash, host chết và network partition; không có out-of-band monitor.
 
-Nguồn: [Schedulable][model], [MarkStaleServers][store], [Runner][runner], [durable.Open][durable], [Agent FileStore][agent-state].
+Nguồn: `agent/runner.go`, `store/memory/store.go`, `store/durable/store.go`, `domain.Server.Schedulable`.
+
 
 ## S1 — Job lifecycle
 
@@ -536,28 +522,20 @@ Nguồn: [ServerStatus/Server.Schedulable][model], [UpsertServer/Heartbeat/SetSe
 
 Nguồn: [model.go][model], [allocation.go][allocation-model], [NVML][nvml], [command lease/ACK][store]. State details/invariants đầy đủ: [DOMAIN_MODEL](DOMAIN_MODEL.md).
 
-## B1 — Frontend → Control Plane → Agent trust boundary
+## B1 — Ranh giới xác thực và tenancy
 
-~~~mermaid
-flowchart LR
-    UI["Browser UI"] -->|HTTP /api/aiwm| BFF["Next.js BFF<br/>whitelist + origin check"]
-    BFF -->|public bearer phía server| PUB["CP public API"]
-    POST["Operator API client"] -->|public bearer| PUB
-    AG["Agent local"] -->|enrollment token| REG["CP register endpoint"]
-    REG -.->|AgentID + token riêng| AG
-    AG -->|Agent bearer: heartbeat / inventory / poll / ACK| INT["CP Agent protocol"]
-    INT -.->|poll response| AG
-    AG -->|local socket| DE["Docker Engine"]
-    AG -->|local library| NV["NVML / NVIDIA GPU"]
-~~~
+Public API dùng opaque session token của `POST /api/v1/auth/login`, hash lưu PostgreSQL, TTL 8 giờ. `GET auth/me` trả User/Organization; logout xóa session, sửa User revoke các session cũ. Mỗi request kiểm tra User/Organization enabled. Không OAuth/SSO/JWT/public self-registration; bootstrap admin qua CLI riêng.
 
-`src/app/api/aiwm/[...path]/route.ts` chỉ forward public GET/POST được whitelist. Browser không có đường BFF tới Agent routes/Docker socket/NVML; CP không gọi remote NVML. Public và Agent protocol hiện cùng HTTP server, tách bằng route/auth, không phải hai process/API gateway riêng.
+BFF nhận session token từ login response, đặt cookie HttpOnly/SameSite=Strict; không trả token vào browser JSON. `AIWM_SESSION_COOKIE_SECURE=true` khi frontend chạy HTTPS; false chỉ cho HTTP local. BFF chỉ whitelist public routes, chặn mutation Origin khác host và forward token tương ứng session. Backend `sessionAuth` là security boundary; filter UI không cấp quyền. Rate limit login theo peer IP là in-memory trong một CP, và giới hạn đồng thời password hashing.
 
-`AIWM_API_TOKEN` chỉ được đọc ở Next.js server và đính vào upstream public request. Register dùng `X-Enrollment-Token`; các requests theo AgentID dùng token riêng, CP lưu SHA-256 hash trong Server, Agent lưu token thật ở local state. Job public response che environment; command payload và private persistence vẫn cần full spec để chạy container.
+ORGANIZATION_USER chỉ list/get/stop/drain tài nguyên cùng organization; query organizationId bị từ chối. ADMIN có thể lọc đọc nhiều đơn vị, quản lý organization/user và chọn org khi tạo enrollment. Job submit của mọi role luôn lấy org của account. Organization filter chỉ dùng để xem không đổi quyền submit.
 
-CP hỗ trợ server TLS tùy cấu hình. Agent client hỗ trợ custom CA/client certificate; CP trực tiếp chưa enforce client CA/mTLS. Console hiện chưa có user login/RBAC/session authorization: BFF origin check và token upstream không thay thế xác thực người dùng, và mutation không có Origin vẫn được helper cho qua. Quyền điều khiển local Docker thuộc Agent trên host.
+Agent register dùng enrollment token riêng cho machine; các endpoint inventory/heartbeat/poll/ACK dùng Agent token và AgentID. Metadata resolve ownership, không trust field/labels từ Agent. Agent token chưa có TTL/revocation API riêng; re-register xoay token. Revoke enrollment chỉ chặn register lại.
 
-Nguồn: [BFF][bff], [proxy-policy][proxy-policy], [server config][fe-config], [publicAuth][security], [RegisterAgent][cp], [Agent HTTP/TLS client][agent-client], [production deployment guide][agent-deploy].
+CP hỗ trợ TLS server; Agent hỗ trợ CA/client cert nhưng CP trực tiếp chưa enforce client CA/mTLS. Docker socket/NVML thuộc host Agent. Không proxy Agent routes hoặc Docker qua BFF. Public Job che env values và làm sạch score trong status/event text; private runtime snapshot/command giữ full execution spec.
+
+Nguồn: `httpapi/identity.go`, `application/identity.go`, `store/postgres/store.go`, frontend `src/app/api/aiwm/[...path]/route.ts`.
+
 
 ## P1 — Deployment demo hiện có
 
@@ -573,11 +551,12 @@ flowchart LR
         AS[("agent-a100-data")]
         TS[("agent-t4-data")]
         CP --> DATA
+        CP --> PG[("postgres / metadata-data")]
         A --> AS
         T --> TS
         A -->|outbound HTTP| CP
         T -->|outbound HTTP| CP
-        NEXT -->|HTTP + public token| CP
+        NEXT -->|HTTP + session token| CP
     end
     NATIVE["Next.js native trên Windows<br/>phương án thay console container"] -->|localhost:8080| CP
 ~~~
@@ -586,7 +565,7 @@ flowchart LR
 
 `agent-a100` dùng `a100-external.yaml`, seed External ở GPU index 0; `agent-t4` dùng `t4-empty.yaml`. Profile mount read-only; Agent identity và simulated Docker runtime giữ ở volume riêng mỗi Agent. [Dockerfile.sim][sim-dockerfile] nạp `libnvidia-ml.so.1` qua `LD_LIBRARY_PATH`, YAML qua `MOCK_NVML_CONFIG`.
 
-Không có database service: CP lưu `/data/control-plane.gob`. `simulator.Runtime` giữ JSON containers và phát events mô phỏng; **không chạy image/command/CUDA thật**, không tự tạo compute utilization tương ứng với Job. Metrics GPU trong demo đi qua adapter NVML nhưng dữ liệu từ mock profile.
+Có PostgreSQL cho metadata; CP vẫn lưu runtime /data/control-plane.gob. `simulator.Runtime` giữ JSON containers và phát events mô phỏng; **không chạy image/command/CUDA thật**, không tự tạo compute utilization tương ứng với Job. Metrics GPU trong demo đi qua adapter NVML nhưng dữ liệu từ mock profile.
 
 NVML adapter hiện yêu cầu Linux/CGO; [nvml_unsupported.go][nvml-unsupported] trả lỗi ở native Windows. Vì vậy Windows laptop dùng Linux containers/WSL cho Agent sim; việc đọc tài liệu này không yêu cầu khởi chạy chúng.
 
@@ -597,6 +576,7 @@ flowchart LR
     USER["Browser"] --> FE["Next.js frontend + BFF"]
     FE --> CP["aiwm-server<br/>một writer"]
     CP --> DISK[("local durable gob")]
+    CP --> PG[("PostgreSQL metadata")]
     subgraph A["GPU Server A - Linux"]
         AG1["aiwm-agent"]
         DK1["Docker Engine<br/>External + Managed containers"]
@@ -632,7 +612,7 @@ Bốn composition roots giữ vai trò riêng:
 | [cmd/aiwm-agent-sim][sim-main] | Cùng Agent core/NVML adapter; mock NVML library và simulated Docker boundary. |
 | [cmd/aiwm-scheduler-bench][bench] | Thí nghiệm deterministic dùng application.Scheduler; không phải daemon hoặc service trong deployment. |
 
-Production quota service, PostgreSQL, HA/leader election và distributed lock: **Planned / Not implemented**, không nằm trong diagrams như component đang hoạt động.
+PostgreSQL metadata đã nối runtime; schema không tự migrate. Production quota service, HA/leader election và distributed runtime lock vẫn chưa implement.
 
 ## Component → Source code mapping
 
@@ -708,7 +688,8 @@ Các links trỏ trực tiếp vào workspace source. Cột Diagram cho biết n
 | TTL auto-stop / neededAt delayed start | NOT_IMPLEMENTED | D6, D8 | Fields được [validate][validation]/[lưu][allocation-app], chưa có timer enforce |
 | Host CPU/RAM admission accounting | NOT_IMPLEMENTED | D7 | Docker nhận limits qua [engine][docker]; [Scheduler][scheduler] không cộng trừ host capacity |
 | Production quota ledger, user/project RBAC | NOT_IMPLEMENTED | D7, B1 | [DevelopmentFacts][policy], [BFF][bff], [publicAuth][security] |
-| PostgreSQL / HA / distributed scheduling lock | NOT_IMPLEMENTED | P2 | [durable][durable] dùng gob; SQL target chưa nối runtime |
+| PostgreSQL metadata | ACTIVE, chưa chạy kiểm chứng | D1/P2 | store/postgres; runtime vẫn gob |
+| HA / distributed scheduling lock | NOT_IMPLEMENTED | P2 | local one-writer lock |
 | MIG/sharing/time-sharing/preemption/reclaim/checkpoint | NOT_IMPLEMENTED | D1, D7 | Ngoài scope; whole-GPU filter và [validation][validation]; NVML đánh dấu MIG enabled không healthy |
 
 ## Design observations / Inconsistencies
@@ -787,13 +768,14 @@ Các observations dưới đây đến từ source đã đọc, không phải l�
 
 **Relevant files:** [capability/catalog.go][catalog], [domain/allocation.go][allocation-model], [application/allocation.go][allocation-app], [scheduler.go][scheduler], [engine.go][docker].
 
-### O10 — Persistence và auth có phạm vi một môi trường operator
+### O10 — Hai loại persistence, một runtime writer
 
-**Observation:** CP serialize toàn bộ mutation/read quanh memory + gob snapshot, một file writer. Server restore offline để chờ inventory mới. Public API dùng static bearer; BFF không có user login/RBAC. Agent client cert support chưa tương đương CP enforce mTLS.
+**Observation:** PostgreSQL lưu metadata/session/enrollment, runtime reservation dùng gob. Bind và Upsert runtime là hai commit nối tiếp. Organization enabled đọc theo cycle, không atomic với runtime commit đang chạy.
 
-**Impact:** không coi SQL target, browser origin check hoặc client certificate config là PostgreSQL transaction, multi-user authorization hay HA đã implement. Full snapshot mỗi mutation và giữ lịch sử chưa có retention đặt giới hạn khi state lớn; task này không đo tải/power-loss durability.
+**Impact:** không phải distributed transaction/HA. Runtime write lỗi có thể để enrollment đã bind; retry cùng machine/token. Chưa có migration org cho snapshot cũ hoặc backup coordinator hai store. Chưa xác minh power-loss durability/tải.
 
-**Relevant files:** [durable/store.go][durable], [snapshot.go][snapshot], [security.go][security], [BFF][bff], [Agent client][agent-client], [CP entrypoint][cp-main].
+**Source:** store/postgres/store.go, application/controlplane.go, store/durable/store.go.
+
 
 ### O11 — Simulator và event fallback có giới hạn kiểm chứng
 
@@ -858,3 +840,9 @@ Các observations dưới đây đến từ source đã đọc, không phải l�
 [proxy-policy]: ../AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/lib/api/proxy-policy.ts
 [fe-config]: ../AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/config/server.ts
 [compose]: ../compose.yaml
+
+## Nội dung hợp nhất từ ARCHITECTURE.md
+
+Giữ bốn composition roots và adapter boundaries. Durable bọc critical section của memory, rollback khi ghi snapshot lỗi, file lock một writer; PostgreSQL metadata không thay cơ chế này. JSON slog có request/job/server/command ID, không log token/env payload. Health/ready là process probes, không chứng minh đủ GPU hoặc PostgreSQL schema đã đúng.
+
+External classification, normalize occupancy, Stop/late-START interleaving và terminal Assignment được giữ ở D4/D8/D9 và Design observations. Catalog snapshot của Job không tự cập nhật khi catalog thay; health/occupancy/VRAM được recheck. Full processed ACK chỉ lưu ở Agent. Chi tiết lifecycle ở DOMAIN_MODEL, policy nghiệp vụ ở CORPORATE_POLICY.

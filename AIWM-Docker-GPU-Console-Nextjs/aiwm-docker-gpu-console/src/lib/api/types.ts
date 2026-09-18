@@ -20,6 +20,10 @@ export type JobStatus =
 export type SchedulingStrategy = "first-fit" | "best-fit" | "bin-pack" | "fragmentation-aware";
 
 export interface ClusterSummary {
+  serversOffline: number;
+  gpusReserved: number;
+  gpusAllocated: number;
+  gpusUnhealthy: number;
   serversTotal: number;
   serversOnline: number;
   gpusTotal: number;
@@ -62,6 +66,7 @@ export interface Container {
 }
 
 export interface Server {
+  organizationId: string;
   schedulable: boolean;
   schedulingReason: string;
   host: { hostname: string; os: string; architecture: string; cpuCount: number; memoryTotalMiB: number };
@@ -83,6 +88,7 @@ export interface Server {
 }
 
 export interface GPUInventoryItem {
+  organizationId: string;
   serverId: string;
   serverName: string;
   serverStatus: ServerStatus;
@@ -119,6 +125,7 @@ export interface Assignment {
 }
 
 export interface Job extends Partial<AllocationIntent> {
+  organizationId: string;
   policy: PolicyDecision;
   necessityLabel: string;
   id: string;

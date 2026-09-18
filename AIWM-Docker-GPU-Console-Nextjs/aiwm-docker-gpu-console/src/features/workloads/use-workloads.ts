@@ -1,12 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/features/identity/session";
 import { api } from "@/lib/api/api-client";
 import { queryKeys } from "@/lib/api/query-keys";
 
-export const useJobs = () => useQuery({ queryKey: queryKeys.jobs, queryFn: api.getJobs });
+export function useJobs() { const { organizationFilter } = useSession(); return useQuery({ queryKey: [...queryKeys.jobs, organizationFilter], queryFn: () => api.getJobs(organizationFilter) }); }
 export const useJob = (id: string) => useQuery({ queryKey: queryKeys.job(id), queryFn: () => api.getJob(id), enabled: Boolean(id) });
-export const useQueue = () => useQuery({ queryKey: queryKeys.queue, queryFn: api.getQueue });
+export function useQueue() { const { organizationFilter } = useSession(); return useQuery({ queryKey: [...queryKeys.queue, organizationFilter], queryFn: () => api.getQueue(organizationFilter) }); }
 
 export function useCreateJob() {
   const client = useQueryClient();

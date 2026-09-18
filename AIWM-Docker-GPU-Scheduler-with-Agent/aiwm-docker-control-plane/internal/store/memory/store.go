@@ -41,6 +41,9 @@ func (s *Store) UpsertServer(_ context.Context, incoming domain.Server) (domain.
 
 	if id, ok := s.machines[incoming.MachineID]; ok {
 		existing := s.servers[id]
+		if existing.OrganizationID != incoming.OrganizationID || (incoming.OrganizationID!="" && incoming.ID!=existing.ID) {
+			return domain.Server{},domain.ErrConflict
+		}
 		existing.Name = incoming.Name
 		existing.Address = incoming.Address
 		existing.AgentVersion = incoming.AgentVersion
@@ -85,6 +88,9 @@ func (s *Store) Heartbeat(_ context.Context, agentID string, at time.Time) (doma
 	server, ok := s.servers[agentID]
 	if !ok {
 		return domain.Server{}, domain.ErrNotFound
+	}
+	if server.Status==domain.ServerOffline || at.Sub(server.LastHeartbeatAt)>s.offlineAfter {
+		server.InventoryReceivedAt=time.Time{}
 	}
 	server.LastHeartbeatAt = at
 	if server.Drained {
@@ -278,6 +284,7 @@ func (s *Store) CommitAssignment(_ context.Context, jobID string, placement doma
 	if !ok {
 		return domain.Job{}, domain.ErrNotFound
 	}
+	if !domain.SameOrganization(job.OrganizationID,server.OrganizationID) { return domain.Job{},domain.ErrConflict }
 	if !server.Schedulable(at, s.offlineAfter) || job.Resources.GPUCount <= 0 || len(placement.GPUUUIDs) != job.Resources.GPUCount || command.AgentID != server.ID {
 		return domain.Job{}, domain.ErrConflict
 	}
@@ -359,6 +366,7 @@ func (s *Store) LeaseCommands(_ context.Context, agentID string, now time.Time, 
 		if command.AgentID != agentID {
 			continue
 		}
+		if command.Type==domain.CommandStartContainer && !s.servers[agentID].Schedulable(now,s.offlineAfter) { continue }
 		if command.Type == domain.CommandStopContainer {
 			var stop struct{ JobID string }
 			_ = json.Unmarshal(command.Payload, &stop)

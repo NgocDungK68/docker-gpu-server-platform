@@ -1,0 +1,11 @@
+{
+  "description": "Demo qua Agent core và NVIDIA mock NVML; không inject state vào API/frontend.",
+  "servers": [
+    {"machineId": "vtt-gpu-01", "organizationCode": "VTT", "model": "NVIDIA H100 80GB HBM3", "architecture": "hopper", "gpuCount": 4, "vramGiB": 80, "externalGpuIndexes": [0]},
+    {"machineId": "vtt-gpu-02", "organizationCode": "VTT", "model": "NVIDIA A100-SXM4-80GB", "architecture": "ampere", "gpuCount": 8, "vramGiB": 80},
+    {"machineId": "vds-gpu-01", "organizationCode": "VDS", "model": "NVIDIA H100 80GB HBM3", "architecture": "hopper", "gpuCount": 4, "vramGiB": 80},
+    {"machineId": "vds-gpu-02", "organizationCode": "VDS", "model": "NVIDIA A100-SXM4-80GB", "architecture": "ampere", "gpuCount": 4, "vramGiB": 80, "unhealthyGpuIndexes": [0]},
+    {"machineId": "vtnet-gpu-01", "organizationCode": "VTNET", "model": "NVIDIA H100 80GB HBM3", "architecture": "hopper", "gpuCount": 4, "vramGiB": 80, "unknownGpuIndexes": [1]},
+    {"machineId": "vtit-gpu-01", "organizationCode": "VTIT", "model": "NVIDIA A100-SXM4-80GB", "architecture": "ampere", "gpuCount": 2, "vramGiB": 80}
+  ]
+}
