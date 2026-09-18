@@ -93,10 +93,10 @@ WSL: `bash scripts/demo-down.sh`. Chỉ project `aiwm-org-demo`, giữ named vol
 
 ### Ranh giới với REAL DEPLOYMENT
 
-GPU server production sẽ nhận generic Agent release + installer + enrollment riêng, không clone repo và không cần Go compiler. Release builder/installer đang là bước kế tiếp của Phase B. Phần LEVEL 3 build từ source phía dưới chỉ là DEVELOPMENT/TROUBLESHOOTING, chưa phải quy trình production đã kiểm chứng. Chưa có GPU NVIDIA vật lý để chứng nhận real E2E.
+GPU server production nhận generic Agent release + installer + enrollment riêng, không clone repo và không cần Go compiler. Xem Real Deployment Demo và REAL GPU SERVER E2E bên dưới. Laptop chưa có GPU NVIDIA để chứng nhận real E2E.
 
 ---
-Tài liệu dành cho người chạy thủ công. **Task implementation này không chạy build, test, migration, Docker, npm hoặc network.** Các lệnh dưới đây dựa trên entrypoint, Compose, Makefile, script và routes hiện có; kết quả mong đợi chưa phải kết quả đã kiểm chứng.
+Các phần local dưới đây là lựa chọn chạy thủ công. Kết quả đã kiểm chứng được ghi riêng ở mục FAKE và IMPLEMENTATION_STATUS; real GPU cần kiểm tra trên host NVIDIA thật.
 
 ## Chuẩn bị chung và bảo toàn dữ liệu
 
@@ -104,11 +104,11 @@ Tài liệu dành cho người chạy thủ công. **Task implementation này kh
 - Backend: `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane`.
 - Frontend: `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console`.
 - Windows: PowerShell, Python 3.10+, Go ≥1.24, Node.js 24; PostgreSQL local hoặc Docker Desktop Linux containers. Agent production chỉ chạy trên Linux. Fake Agent dùng Linux container; không cần GPU vật lý trên laptop.
-- Dùng project Compose riêng `aiwm-org-demo` để không đụng volume demo cũ. Port 5432/8080/3000 phải trống; không chạy CP native và CP container cùng port.
+- Dùng project Compose riêng `aiwm-org-demo` để không đụng volume demo cũ. Port 15432/8080/3000 phải trống; không chạy CP native và CP container cùng port.
 - `scripts/configure.py` sinh credentials local nếu thiếu, giữ giá trị cũ, không in secret. Đọc username/password bootstrap trong `.env` bằng editor, không commit/export credentials. Có thể đổi seed `AIWM_BOOTSTRAP_ORGANIZATION_CODE/NAME` trước khi bootstrap.
 - VTT/Viettel Telecom là seed mặc định của script; VTNET/Viettel Network và VDS/Viettel Digital Services có thể tạo qua UI/API. Không có mã đơn vị trong scheduler.
 - Runtime snapshot cũ thiếu `organizationId` không tự được chuyển ownership; Job cũ không nhận placement. Không xóa snapshot/state cũ. Với native demo mới, chọn `AIWM_STATE_FILE=.local/control-plane-org.gob`. Việc chuyển ownership dữ liệu cũ đang chạy cần quy trình riêng; chưa có migration tự động.
-- `go.mod` thêm `lib/pq`. Chưa tải dependency trong task; chạy `go mod tidy` thủ công trước build và review `go.mod/go.sum`.
+- Dependencies và checksum đã có trong go.mod/go.sum. Chỉ development mới cần Go toolchain; Compose/release dùng builder image.
 
 ## LEVEL 1 — Backend/frontend local
 
@@ -117,12 +117,12 @@ Tài liệu dành cho người chạy thủ công. **Task implementation này kh
 Tại workspace root, PowerShell:
 
 ```powershell
-python scripts/configure.py
+python scripts/configure.py --postgres-port 15432
 docker compose -p aiwm-org-demo up -d postgres
 docker compose -p aiwm-org-demo logs --tail 30 postgres
 ```
 
-Chờ PostgreSQL báo sẵn sàng nhận kết nối. Script tạo `AIWM_DATABASE_URL` dùng `localhost:5432` cho backend native; Compose CP dùng `AIWM_COMPOSE_DATABASE_URL` với hostname `postgres`. `sslmode=disable` chỉ cho lab local; môi trường nội bộ qua mạng cần cấu hình TLS phù hợp.
+Chờ PostgreSQL báo sẵn sàng nhận kết nối. Script tạo `AIWM_DATABASE_URL` dùng `localhost:15432` cho backend native; Compose CP dùng `AIWM_COMPOSE_DATABASE_URL` với hostname `postgres`. `sslmode=disable` chỉ cho lab local; môi trường nội bộ qua mạng cần cấu hình TLS phù hợp.
 
 ### 2. Schema và admin đầu tiên
 
@@ -213,78 +213,272 @@ Simulator **không chạy payload/image/CUDA thật**, không tự tạo tải G
 - Muốn mô phỏng start thất bại: `simulator.Config` hỗ trợ `AIWM_SIM_REJECT_STARTS`; dùng một Agent Sim riêng/token/machine/profile không trùng UUID và setting này. Chưa có command/script tenant-aware tự dựng scenario đó: `TODO: command not defined by current repository`.
 - Các scripts `acceptance.py`, `recovery.py`, `doctor.py` cũ còn dựa token chung; chưa được migrate sang session/enrollment mới. Không dùng kết quả lịch sử của chúng để chứng nhận task này.
 
-## LEVEL 3 — GPU server thật (Linux)
+## Real Deployment Demo — Control Plane Host
 
-### 1. Prerequisites
+Máy trung tâm chạy Control Plane/frontend/storage. Chỉ máy AIWM/CP host có checkout; **GPU host không clone repo, không cần Go compiler**.
 
-Control Plane/PostgreSQL đã chạy và có Organization/User/Enrollment. GPU host cần Linux, Go ≥1.24 nếu build tại host, CGO/GCC, Docker Engine, NVIDIA Driver/NVML và NVIDIA Container Toolkit cấu hình runtime `nvidia`. Quyền Docker socket cho account chạy Agent và quyền đọc NVIDIA devices/NVML.
+### A. Deploy Control Plane
 
-Repo không có script cài driver/toolkit theo distro hoặc copy source sang host: **`TODO: command not defined by current repository`**. Chuẩn bị bằng quy trình của đơn vị. CP Compose mặc định chỉ bind 127.0.0.1; GPU server từ xa cần endpoint CP có thể truy cập, TLS/firewall theo deployment nội bộ. Với CP native, `AIWM_HTTP_ADDR`, `AIWM_TLS_CERT_FILE`, `AIWM_TLS_KEY_FILE` là config thực có.
+Trên CP host Linux có Docker/Compose và Python 3, tại workspace root:
 
-### 2. Build/cấu hình/preflight
+~~~bash
+python3 scripts/configure.py --postgres-port 15432
+~~~
 
-Trên Linux GPU host, tại backend root, theo Makefile và `docs/agent-deployment.md` của backend:
+Trong .env đặt các giá trị sau (hoặc IP interface cụ thể thay 0.0.0.0):
 
-```bash
-go mod tidy
-CGO_ENABLED=1 go build -trimpath -o bin/aiwm-agent ./cmd/aiwm-agent
-cp .env.agent.example .env.agent
-chmod 600 .env.agent
-```
+~~~dotenv
+AIWM_CP_BIND_HOST=0.0.0.0
+AIWM_CONSOLE_BIND_HOST=0.0.0.0
+AIWM_SESSION_COOKIE_SECURE=false
+~~~
 
-Chỉ copy example nếu chưa có `.env.agent`; giữ cấu hình hiện có. Điền URL CP thực, enrollment token của đúng server, name và state path. `MachineID` mặc định `/etc/machine-id`; không clone state giữa host. `AIWM_AGENT_LABELS` không đổi ownership; display name/labels authoritative từ enrollment.
+Giữ bootstrap credentials do configure sinh, không seed demo-users.json trên deployment này. PostgreSQL chỉ publish loopback:15432; Agent không kết nối database.
 
-```bash
-sudo ./bin/aiwm-agent --check
-sudo ./bin/aiwm-agent
-```
+~~~bash
+docker compose -p aiwm-real --profile console build control-plane console
+docker compose -p aiwm-real up -d --wait postgres
+docker compose -p aiwm-real run --rm --no-deps control-plane --migrate
+# Chỉ lần đầu, khi database chưa có user:
+docker compose -p aiwm-real run --rm --no-deps control-plane --bootstrap-admin
+docker compose -p aiwm-real up -d control-plane console
+curl -fsS http://127.0.0.1:8080/healthz
+~~~
 
-`--check` không cần enrollment token, không register, không pull/start/stop container. Báo JSON gồm OS/architecture/kernel/cgroup, Docker version/API/OS/runtime nvidia, NVML availability/GPU count; sau đó thử FULL inventory. `SUPPORTED` chỉ là điều kiện nền tảng, không cam kết GPU FREE. `DEGRADED`/`UNSUPPORTED` hoặc inventory lỗi → exit khác 0; sửa môi trường rồi chạy lại. Startup production cũng dùng preflight.
+Login tại http://IP-hoặc-DNS-thật-của-CP:3000/login bằng bootstrap account. ADMIN tạo Organization VTT/VDS/... và user tương ứng trên màn quản lý. Không chạy aiwm-real cùng ports 8080/3000 với fake demo trên một host.
 
-Socket permission được kiểm tra bằng truy cập Docker API với account hiện tại, không sửa quyền. Runtime `nvidia` trong Docker Info là bằng chứng cấu hình, **không chứng minh mọi CUDA image chạy được**; triển khai CDI-only có thể bị đánh giá DEGRADED vì MVP chưa xác minh đường này. Non-Linux không giả thành công.
+Lab mạng nội bộ có thể dùng HTTP:8080. HTTPS cần TLS termination theo hạ tầng đơn vị; repo chưa có reverse-proxy/certificate automation. Frontend qua HTTPS đặt AIWM_SESSION_COOKIE_SECURE=true rồi recreate console. Chỉ mở cổng cần thiết cho các GPU host.
 
-Có thể đối chiếu bằng `docker ps` và `nvidia-smi` như hướng dẫn Agent hiện có; chạy bằng account có quyền. Không thêm container probe hoặc `--gpus all` vào server đang dùng.
+Trên máy development, nhập URL ổn định mà GPU servers truy cập được, không dùng localhost:
 
-### 3. Register → real workload → release
+~~~bash
+read -r -p "Control Plane URL thực tế (http(s)://host[:port]): " CONTROL_PLANE_URL
+export CONTROL_PLANE_URL
+curl -fsS "$CONTROL_PLANE_URL/healthz"
+~~~
 
-1. UI/API: server đúng Organization, ONLINE **và** schedulable; NVML UUID/model/VRAM trùng GPU host. Kiểm tra External/unknown trước khi cấp phát.
-2. Submit Job nhỏ như LEVEL 2, `gpuCount=1`, profile phù hợp GPU thật, FP8=false; không nhập UUID/server/strategy. Image phải được phép trong môi trường; `alpine:3.21` + `sleep 300` kiểm tra container/GPU grant, không chứng minh CUDA computation.
-3. CP tạo START_CONTAINER; Agent kiểm tra lại local occupancy, inspect image và pull nếu chưa có, create/start Docker với DeviceRequests driver `nvidia` và exact UUID.
-4. API/UI: Assignment server/UUID đúng đơn vị, Job RUNNING sau inventory. Trên host `docker ps` thấy container `aiwm-<jobID>`; `nvidia-smi` hiển thị trạng thái GPU thực. Workload sleep có thể không tạo GPU process/utilization; đó không phải lỗi allocation.
-5. Stop từ UI/API; inventory thấy terminal → Job STOPPED, Assignment RELEASED. Chỉ FREE nếu không còn External/unknown/unhealthy/managed blocker.
-6. Image pull/create/start lỗi → ACK failed, Command FAILED, Job FAILED và release logical reservation. Không có command-status public endpoint riêng; dùng Job status/events/Assignment. Nếu ACK chưa tới vì network, giữ reservation tới khi biết kết quả; không release chỉ dựa timeout Agent.
+### B. AIWM team build một lần
 
-### 4. Failure tests trên môi trường được phép
+Development cần Bash + Docker/BuildKit; Go/GCC nằm trong builder. Windows chạy từ WSL. Script dùng Docker CLI Linux; nếu thiếu socket mà có Docker Desktop Windows CLI thì dùng docker.exe và chuyển path bằng wslpath, không sửa cấu hình host.
 
-**A. Dừng riêng Agent:** giữ Job đang running lâu đủ quan sát. Với Agent foreground, Ctrl+C ở terminal Agent; đây là stop graceful, không phải SIGKILL. Container Docker tiếp tục running. Sau ngưỡng offline (mặc định 20 giây, cộng nhịp Reconcile 5 giây), UI báo OFFLINE/schedulable=false. Submit mới cùng đơn vị không lấy GPU trên server đó. Không đánh dấu GPU FREE vì mất heartbeat.
+~~~bash
+bash scripts/build-agent-release.sh --control-plane-url "$CONTROL_PLANE_URL"
+~~~
 
-Nếu đã cài service theo `deploy/agent/aiwm-agent.service` và hướng dẫn backend:
+Output mặc định **dist/aiwm-agent-0.2.0-linux-amd64/** gồm aiwm-agent, install-agent-linux.sh, aiwm-agent.service, BUILD_INFO.txt và SHA256SUMS. BUILD_INFO ghi version/platform, glibc của builder và default URL. Checksum giúp đối chiếu file, không thay chữ ký release. Artifact không chứa enrollment/password.
 
-```bash
+Script giữ nguyên output đã có, kể cả thư mục còn từ build lỗi; chọn --output-dir dist/agent-release-lan-01 khi cần. Artifact validation trên laptop dùng URL localhost: **build với URL CP thật trước khi phân phối**.
+
+URL precedence:
+
+1. AIWM_CONTROL_PLANE_URL từ process environment hoặc /etc/aiwm-agent/agent.env;
+2. config.ReleaseControlPlaneURL inject bằng -X github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent/config.ReleaseControlPlaneURL=...;
+3. http://localhost:8080 cho development.
+
+Helpers nhận HTTP(S) origin hostname/IPv4 và port tùy chọn, không credentials/query/path prefix. Thay CP URL bằng runtime override rồi restart Agent, không cần rebuild theo organization.
+
+### C. Enrollment riêng từng server
+
+UI: ADMIN → Server onboarding → chọn organization → đặt tên → tạo enrollment. Normal user dùng đơn vị của account. Hoặc từ máy AIWM, password nhập ẩn:
+
+~~~bash
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username admin enroll \
+  --organization VTT --name VTT-GPU-01 --token-file .cache/enrollments/vtt-01.token
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username admin enroll \
+  --organization VTT --name VTT-GPU-02 --token-file .cache/enrollments/vtt-02.token
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username admin enroll \
+  --organization VDS --name VDS-GPU-01 --token-file .cache/enrollments/vds-01.token
+~~~
+
+Helper không in token, tạo file mới mode 0600 trên Linux và không ghi đè file/enrollment đang tồn tại. Nếu API/write file thất bại, xem enrollment theo tên trên UI/API; revoke cái chưa dùng qua POST /api/v1/enrollments/{enrollmentID}/revoke trước khi cấp lại. Không revoke enrollment của Agent đang hoạt động để thử lệnh này.
+
+Cả ba server nhận **cùng release**, token khác nhau. CP bind token → ServerID → OrganizationID; register bind thêm MachineID. Agent không nhận organizationCode. Enrollment chưa bind hết hạn sau 24 giờ; sau bind chỉ cùng machine được re-register đến khi revoke.
+
+## REAL GPU SERVER E2E — VTT-GPU-01
+
+### 1. Baseline và kiểm tra chỉ đọc
+
+Target release: **Linux x86_64, glibc từ 2.31**, Docker standalone, NVIDIA Driver/NVML, GPU NVIDIA, Container Toolkit đã cấu hình runtime nvidia. Nhắm Ubuntu/Debian và RHEL/Rocky/Alma khi ABI/dependencies phù hợp; không chứng nhận mọi phiên bản distro. ARM64, musl/Alpine và glibc thấp hơn baseline chưa được chứng nhận.
+
+Trên GPU host, account có quyền Docker:
+
+~~~bash
+uname -s
+uname -m
+getconf GNU_LIBC_VERSION
+test -s /etc/machine-id
+docker version
+docker info --format '{{json .Runtimes}}'
+ls -l /var/run/docker.sock
+nvidia-smi -L
+nvidia-smi
+~~~
+
+Cần Linux/x86_64, Docker đáp ứng, runtime nvidia và GPU thật. Không probe --gpus all hoặc stop existing containers. Driver phải tương thích image workload; preflight chưa chứng nhận CUDA execution. CDI-only chưa được chấp nhận nếu Docker Info không công bố runtime nvidia.
+
+### 2. Chuyển release; không clone repo
+
+Từ máy AIWM, dùng output directory thật nếu đã thay bằng --output-dir:
+
+~~~bash
+read -r -p "SSH target của VTT-01 (user@host): " GPU_SSH
+scp -r dist/aiwm-agent-0.2.0-linux-amd64 "$GPU_SSH:~/aiwm-agent-release"
+scp .cache/enrollments/vtt-01.token "$GPU_SSH:~/aiwm-enrollment.token"
+ssh "$GPU_SSH"
+~~~
+
+Dùng thư mục đích mới để tránh lồng directory từ lần copy trước. Trên GPU server:
+
+~~~bash
+cd ~/aiwm-agent-release
+sha256sum -c SHA256SUMS
+chmod 600 ~/aiwm-enrollment.token
+chmod +x aiwm-agent install-agent-linux.sh
+./aiwm-agent --version
+sudo ./aiwm-agent --check
+# URL trong BUILD_INFO là public; kiểm tra từ chính GPU host:
+CP_URL="$(sed -n 's/^ControlPlaneURL=//p' BUILD_INFO.txt)"
+curl -fsS "$CP_URL/healthz"
+sudo ./install-agent-linux.sh --binary ./aiwm-agent \
+  --enrollment-token-file "$HOME/aiwm-enrollment.token"
+~~~
+
+Có thể bỏ token options để nhập token ẩn, hoặc dùng --enrollment-token "$TOKEN"; file/prompt tránh lộ token trong process arguments. URL thường không cần nhập. Nếu cần override, thêm --control-plane-url "$CONTROL_PLANE_URL" vào lệnh install; biến URL phải được nhập lại trên SSH terminal.
+
+Installer kiểm tra Linux/amd64, MachineID, Docker socket/group, preflight thật rồi tạo account aiwm-agent, binary /usr/local/bin/aiwm-agent, config /etc/aiwm-agent/agent.env (root:0600), state /var/lib/aiwm-agent (aiwm-agent:0700), kiểm tra quyền service và cài unit. Không cài/restart Docker/driver hoặc thao tác containers.
+
+Thiếu dependency thì sửa theo quy trình đơn vị rồi check lại. Installer từ chối ghi đè installation có sẵn. Nếu check quyền service thất bại sau khi copy binary/config, giữ các file và sửa quyền trước khi start; không xóa state. Sau khi runuser --check PASS, có thể cài unit từ release bằng:
+
+~~~bash
+sudo install -m 0644 ./aiwm-agent.service /etc/systemd/system/aiwm-agent.service
+sudo systemctl daemon-reload
+~~~
+
+### 3. Preflight và start
+
+~~~bash
+sudo /usr/local/bin/aiwm-agent --check
+sudo runuser -u aiwm-agent -g aiwm-agent -G docker -- /usr/local/bin/aiwm-agent --check
+sudo systemctl enable --now aiwm-agent
+sudo systemctl status aiwm-agent --no-pager
+sudo journalctl -u aiwm-agent -n 50 --no-pager
+~~~
+
+--check không register/pull/start/stop container. JSON báo OS/architecture/kernel/cgroup, MachineID availability, Docker reachable/version/API/runtime nvidia, NVML/GPU count; sau đó thử inventory. SUPPORTED + exit 0 là điều kiện nền tảng; DEGRADED/UNSUPPORTED + exit khác 0 phải xử lý trước. Inventory health/free/occupancy vẫn quyết định scheduling.
+
+Unit nạp config, restart on failure, chỉ quản lý Agent process. Nếu không có systemd:
+
+~~~bash
+sudo sh -c 'set -a; . /etc/aiwm-agent/agent.env; exec /usr/local/bin/aiwm-agent'
+~~~
+
+Foreground cần terminal/supervisor của đơn vị. Token vẫn cần để re-register/re-auth nên giữ config bảo vệ.
+
+### 4. Verify ownership/inventory và workload nhẹ
+
+Trên máy AIWM:
+
+~~~bash
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username vtt servers
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username vtt smoke
+~~~
+
+Trước submit: server ONLINE + schedulable=true, đúng đơn vị; đối chiếu UUID/model/VRAM với nvidia-smi. GPU existing/unknown không được FREE.
+
+Smoke dùng **demo/workloads/real-gpu-smoke.json**: 1 GPU/general/FP8=false, INFERENCE/N4; nvidia/cuda:12.4.1-base-ubuntu22.04 chạy nvidia-smi -L rồi sleep 300; helper điền neededAt. Có thể --image cho mirror/image được phê duyệt và có cùng command. Manifest có Linux amd64 đã được xác nhận; chưa chạy trên GPU thật trong phiên này.
+
+User submit lấy organization từ identity. ADMIN hiện submit theo home organization: muốn test VTT hãy dùng vtt. Nếu có nhiều VTT servers, scheduler chọn bất kỳ server phù hợp trong VTT; không ép VTT-01. Model ngoài catalog T4/A100/H100 có thể inventory được nhưng profile general chưa chấp nhận; task này không sửa catalog.
+
+~~~bash
+read -r -p "Job ID vừa tạo: " JOB_ID
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username vtt status --job-id "$JOB_ID"
+~~~
+
+Theo dõi Job đến RUNNING, Assignment chỉ đúng đơn vị và GPU UUID. Agent pull image nếu thiếu, create/start Docker bằng exact DeviceRequests. Thiếu GPU thì QUEUED.
+
+Trên **server được assignment**, nhập cùng Job ID:
+
+~~~bash
+read -r -p "Job ID cần kiểm tra: " JOB_ID
+docker ps --filter "label=aiwm.job-id=$JOB_ID"
+CONTAINER_ID="$(docker ps -q --filter "label=aiwm.job-id=$JOB_ID")"
+test -n "$CONTAINER_ID"
+docker inspect --format '{{json .HostConfig.DeviceRequests}}' "$CONTAINER_ID"
+docker logs --tail 20 "$CONTAINER_ID"
+nvidia-smi
+~~~
+
+Log in GPU được cấp; sleep giữ container RUNNING đủ quan sát. Đây là GPU visibility/runtime smoke, không benchmark/training; utilization có thể bằng 0.
+
+### 5. Stop/finish và release
+
+Trên máy AIWM (hoặc Stop trên UI):
+
+~~~bash
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username vtt stop --job-id "$JOB_ID"
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username vtt status --job-id "$JOB_ID"
+~~~
+
+Chờ terminal + Assignment.reservationState=RELEASED. Nếu không stop, command kết thúc sau 300 giây rồi được reconcile. FREE chỉ khi không còn blocker. Pull/create/start lỗi phản ánh failure; khi CP nhận ACK/reconciliation kết quả mới release. Mất Agent không tự release.
+
+### 6. Failure, restart và reinstall
+
+Chỉ thử trên server được phép, Job chạy đủ lâu và đã ghi CONTAINER_ID. Không dừng Docker daemon:
+
+~~~bash
 sudo systemctl stop aiwm-agent
+docker inspect --format '{{.State.Running}} {{.State.StartedAt}}' "$CONTAINER_ID"
+# Chờ quá offline timeout + nhịp reconcile rồi đối chiếu UI/API.
 sudo systemctl start aiwm-agent
-sudo systemctl status aiwm-agent
-```
+sudo journalctl -u aiwm-agent -n 50 --no-pager
+~~~
 
-Thử crash cưỡng bức bằng PID-specific kill chưa có command/script được repo định nghĩa: `TODO: command not defined by current repository`. Không dùng kill theo tên rộng trên host dùng chung.
+Container tiếp tục chạy; CP OFFLINE/unschedulable, giữ assignment/reservation/inventory. Restart load state, verify MachineID, FULL inventory/reconcile, fresh/healthy mới được placement.
 
-**B. Khởi động lại Agent:** chạy lại `sudo ./bin/aiwm-agent` hoặc start service. Agent load state, verify MachineID, re-register cùng enrollment/machine, lưu credential, tăng sequence, gửi FULL inventory. CP giữ last-known assignment/inventory và chờ snapshot mới trước placement. Reconciliation nhận lại container đang chạy, không start bản sao.
+Crash riêng Agent (service tự restart, có thể nhanh hơn offline timeout):
 
-**C. CP tạm ngừng:** nếu CP dùng Compose project demo:
+~~~bash
+sudo systemctl kill --kill-whom=main --signal=SIGKILL aiwm-agent
+sudo systemctl status aiwm-agent --no-pager
+~~~
 
-```powershell
-docker compose -p aiwm-org-demo stop control-plane
-docker compose -p aiwm-org-demo start control-plane
-docker compose -p aiwm-org-demo logs --tail 30 control-plane
-```
+Trên CP host, unavailable riêng CP:
 
-Container trên GPU host tiếp tục chạy. Agent startup/heartbeat/command poll retry exponential backoff + jitter, cap 60 giây; inventory giữ interval định kỳ. Sau phục hồi, heartbeat không đủ mở scheduling: phải có FULL inventory fresh. Không dừng PostgreSQL/Docker daemon/GPU host trong phép thử mất CP.
+~~~bash
+docker compose -p aiwm-real stop control-plane
+# Đối chiếu container trên GPU host vẫn chạy và Agent log retry.
+docker compose -p aiwm-real start control-plane
+docker compose -p aiwm-real logs --tail 30 control-plane
+~~~
 
-Chưa có script fault injection network partition trong repo: `TODO: command not defined by current repository`. Chỉ heartbeat không thể phân biệt Agent crash, host chết và network partition. Không có out-of-band monitor.
+Agent retry/backoff+jitter, resync sau kết nối lại. Chỉ heartbeat không phân biệt Agent chết, host chết và network partition. Không mở rộng HA/out-of-band monitoring.
+
+Upgrade cùng host: giữ config/state/MachineID, verify checksum release mới rồi:
+
+~~~bash
+sudo systemctl stop aiwm-agent
+sudo install -m 0755 ./aiwm-agent /usr/local/bin/aiwm-agent
+sudo runuser -u aiwm-agent -g aiwm-agent -G docker -- /usr/local/bin/aiwm-agent --check
+sudo systemctl start aiwm-agent
+~~~
+
+Nếu check thất bại, giữ Agent stopped để xử lý; containers vẫn độc lập. MachineID đổi sau reinstall thì Runner từ chối state của máy khác: cấp enrollment mới, archive state cũ theo quy trình đơn vị rồi onboarding; không silently reuse token/state hoặc xóa assignment cũ.
+
+### DEVELOPMENT / SOURCE TEST — chỉ máy AIWM
+
+GPU host production không cần Go compiler. Development/troubleshoot tại checkout backend Linux có Go/GCC:
+
+~~~bash
+CGO_ENABLED=1 go build -trimpath -o bin/aiwm-agent ./cmd/aiwm-agent
+./bin/aiwm-agent --check
+~~~
+
+Đây không phải quy trình cài cho từng đơn vị. Real GPU E2E chỉ PASS sau khi chạy trên NVIDIA host thật; mock không thay kiểm chứng này.
+
 
 ## Các kiểm tra thủ công sau khi review code
 
-Không có lệnh nào dưới đây đã chạy trong task. Sau khi tải dependency, người dùng có thể chạy trong backend:
+Các lệnh rộng dưới đây là tùy chọn development; không phải prerequisite trên GPU server production. Kết quả targeted release tests nằm trong IMPLEMENTATION_STATUS. Chạy trong backend:
 
 ```powershell
 go fmt ./...

@@ -38,6 +38,36 @@ Domain/control state nằm trong [domain][model] và repository; actual state đ
 
 Chi tiết từng field, invariant và test liên quan: [DOMAIN_MODEL](DOMAIN_MODEL.md). Cách chạy/demo/test Windows và WSL: [README](../README.md), [WINDOWS-WSL](WINDOWS-WSL.md).
 
+## Phát hành tập trung và triển khai Agent
+
+~~~mermaid
+flowchart LR
+    DEV["AIWM team / CI"] -->|"Build một lần, default CP URL"| R["Generic Agent release<br/>binary + installer + checksum"]
+    R --> A["VTT-01<br/>Enrollment A"]
+    R --> B["VTT-02<br/>Enrollment B"]
+    R --> C["VDS-01<br/>Enrollment C"]
+    R --> D["VTNET-01<br/>Enrollment D"]
+    A & B & C & D -->|"Register MachineID + token riêng"| CP["Control Plane"]
+    CP --> M["Enrollment → Server → Organization"]
+~~~
+
+Organization không compile vào Agent. GPU ownership suy ra qua Server. ADMIN cấp enrollment riêng qua UI hoặc scripts/agent-admin.py; không dùng chung token cho cả đơn vị. Binary là production cmd/aiwm-agent, CGO/NVML thật, không kèm mock library hoặc enrollment.
+
+~~~mermaid
+flowchart LR
+    FE["Browser / Frontend BFF"] --> CP["Control Plane Host<br/>HTTP(S) public + Agent API"]
+    CP --> PG[("PostgreSQL metadata")]
+    CP --> RT[("Runtime snapshot")]
+    A["Linux GPU host<br/>Agent + config/state"] -->|"Register, heartbeat, inventory, poll, ACK"| CP
+    CP -.->|"Command trong poll response"| A
+    A --> DO["Docker Engine<br/>Managed + Existing containers"]
+    A --> NV["go-nvml → NVML / NVIDIA Driver → GPU"]
+~~~
+
+URL: AIWM_CONTROL_PLANE_URL > ReleaseControlPlaneURL > development localhost. CP/Console bind loopback mặc định; AIWM_CP_BIND_HOST/AIWM_CONSOLE_BIND_HOST cho phép expose interface phục vụ deployment. PostgreSQL vẫn loopback. Repo không tự dựng reverse proxy/TLS.
+
+GPU host nhận release, installer và token; không clone source hoặc build Go. Installer không thay Docker/driver, không dừng containers. Service restart chỉ tác động Agent; MachineID/state mismatch phải re-onboard có chủ đích. Hướng dẫn [Real Deployment và E2E](TESTING_RUNBOOK.md); chưa chứng nhận execution trên GPU vật lý trong phiên laptop.
+
 ## D1 — Kiến trúc nhiều Organization
 
 ~~~mermaid

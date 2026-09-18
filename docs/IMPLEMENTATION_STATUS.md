@@ -1,68 +1,107 @@
 # Current Task
 
-Đơn giản hóa AIWM theo thứ tự: fake demo → real Agent release → organization đơn giản → UI tiếng Việt → docs.
+REAL AGENT RELEASE / DISTRIBUTION — tiếp tục checkpoint đã commit/push, không sửa lại Fake Demo, policy, scheduler hoặc frontend (18/09/2026).
 
 ## Last Working Checkpoint
 
-FAKE_DEMO_STATUS = WORKING (17/09/2026, Docker Desktop + Windows + Ubuntu WSL2).
-Checkpoint Phase A: `wip: working multi-server fake GPU demo`; nền trước đó `fffd420`.
-REAL_RELEASE_STATUS = PARTIAL — production Agent/preflight có sẵn; chưa có release builder/installer đơn giản.
+RESUMED_FROM = 53486aa (working tree sạch khi recover).
+FAKE_DEMO_STATUS = WORKING — checkpoint 7fd1a79, đã kiểm chứng 17/09; phiên này không chạy lại.
+REAL_RELEASE_STATUS = WORKING — production Linux amd64 binary, glibc 2.31, checksum và safe validation PASS.
+REAL_INSTALL_STATUS = PARTIAL — installer đã kiểm chứng trong container riêng; còn xác nhận Docker/NVML/permissions trên GPU host thật.
+REAL_E2E_RUNBOOK = DONE.
+Checkpoint phiên này: wip: verified Linux Agent release and deployment runbook (không push).
 
 ## DONE
 
-- Sửa xung đột port: native PostgreSQL Windows giữ 5432, demo dùng 15432; synchronize env local, không xóa dữ liệu.
-- Một lệnh up/down; 4 organizations, 5 demo accounts, 6 Agent Sim, 26 GPUs. Scenario configurable; token enrollment riêng từng server, lưu local.
-- Cùng Runner/InventoryCollector/GPU reader và NVIDIA mock NVML; chỉ Docker runtime là simulator.
-- Kiểm chứng backend/BFF/browser và failure/reconnect; external không bị stop; GPU được reserve/release qua state thật.
-- Policy/công thức/placement không thay đổi. OrganizationId hard filter có sẵn được giữ và kiểm chứng; không rewrite model.
-- Không đụng PostgreSQL Windows, Docker resource ngoài project hoặc xóa volume.
+- Recover đúng thứ tự status/branch/log/AGENTS/status; không scan repo hoặc đọc diff khi clean.
+- Giữ ReleaseControlPlaneURL, URL precedence env > build default > localhost, --version, preflight/MachineID đã có trong checkpoint.
+- Sửa builder không tồn tại: Go toolchain 1.26.6-bookworm + buildpack-deps:bullseye (GCC/glibc 2.31 có sẵn), CGO=1, Linux amd64, chỉ build cmd/aiwm-agent.
+- Build helper dùng Docker Desktop Windows CLI nếu WSL thiếu socket; chuyển path bằng wslpath, không đổi Docker/WSL host config.
+- Artifact generic, không organization/token/password. Giữ các output directory của lần build lỗi, không ghi đè/xóa.
+- Installer có sẵn đã PASS đường dẫn/mode0600/state0700/account/systemd/không tự start runtime/không ghi đè trong disposable container, probe stub được đánh dấu rõ.
+- Binary thật chạy --version trên Debian không có Go; thiếu Docker/NVML trả DEGRADED, unschedulable, exit 1.
+- scripts/agent-admin.py: public API, password nhập ẩn, token file riêng mỗi server, không in secret, không ghi đè token. Normal user để backend derive ownership.
+- demo/workloads/real-gpu-smoke.json: image CUDA có Linux amd64 manifest, nvidia-smi -L + sleep 300, 1 GPU; không benchmark.
+- Runbook: CP host/network bind → stable URL → central build → unique enrollment → transfer/install/check/service → GPU E2E/stop/failure/reinstall.
+- SYSTEM_DESIGN có release/deployment diagrams; TECH_STACK phân biệt development Go toolchain với runtime GPU host không cần Go.
+- README documentation index chỉ cập nhật mô tả tìm deployment/tech stack; không rewrite README.
 
 ## PARTIAL
 
-- Real GPU E2E chưa chạy: laptop không có GPU NVIDIA dành cho kiểm thử.
-- REAL DEPLOYMENT cần generic binary build tập trung + default URL/override + installer/systemd, không cần source/Go trên GPU host.
-- Core dùng organizationId bất biến; organizationCode là metadata/seed và hiển thị. Chưa đổi schema sang code; ADMIN submit hiện theo home organization.
-- UI chạy được nhưng chưa hoàn tất giản lược/Việt hóa toàn bộ thuật ngữ và bỏ developer notes.
-- Các docs/fixtures lịch sử không chứng nhận flow mới; mục fake mới trong runbook là authoritative.
+- Không có Linux NVIDIA GPU host thật được cung cấp: chưa chứng nhận successful NVML discovery, container GPU execution, systemd permissions thực hoặc CUDA.
+- Artifact hiện inject http://127.0.0.1:8080 chỉ để validation; không phân phối nguyên artifact này cho GPU server ở máy khác.
+- Baseline ABI glibc 2.31, Linux x86_64; Ubuntu/Debian và RHEL/Rocky/Alma cần đáp ứng ABI, Docker/NVML/runtime nvidia. Không claim mọi distro, ARM64/musl hoặc CDI-only.
+- Installer positive test dùng probe stub, không thay thế preflight trên server. Các tests thật thiếu Docker/NVML chỉ xác nhận fail-closed.
+- Core vẫn dùng organizationId; admin submit theo home organization; không đổi scope này.
 
 ## TODO
 
-- Phase B: build-agent-release, install-agent-linux, hướng dẫn Control Plane network URL/enrollment riêng/release distribution và real E2E.
-- Sau B: cân nhắc tối thiểu nhu cầu orgCode/admin submit; UI Việt hóa; diagrams/docs canonical tương ứng.
-- Chỉ sửa phần cần thiết, không migrate/rewrite runtime store.
+- Deploy CP trên host trung tâm, chọn URL thật; build artifact với URL đó và onboarding một GPU server.
+- Chạy REAL GPU SERVER E2E trong TESTING_RUNBOOK, ghi kết quả thực tế RUNNING → release và failure/reconnect.
+- Không cần làm lại Fake Demo hoặc mở rộng UI/organization trong task này.
 
 ## Commands Verified
 
-- `python scripts/configure.py --postgres-port 15432`; Compose postgres healthy.
-- Build Compose control-plane, agent-a100 (image dùng chung), console.
-- `python scripts/demo.py up --skip-build --set-demo-passwords` (chuyển account lab cũ một lần).
-- `wsl -d Ubuntu --cd /mnt/f/Viettel/VDT/demo-project -- bash scripts/demo-up.sh --skip-build`.
-- `wsl -d Ubuntu --cd /mnt/f/Viettel/VDT/demo-project -- python3 scripts/demo.py check`: PASS.
-- `python scripts/demo.py check`: PASS 7 nhóm.
-- `python scripts/demo.py check --base-url http://127.0.0.1:3000/api/aiwm`: PASS 7 nhóm.
-- `python scripts/demo.py failure`: PASS RESERVED, OFFLINE giữ allocation, Agent/CP restart.
-- Frontend `npm.cmd run typecheck`: PASS; Edge `npm.cmd run test:e2e -- tests/e2e/demo.spec.ts`: 2 PASS.
-- Backend `go test ./internal/application ./internal/httpapi ./internal/store/memory`: PASS.
-- Không chạy benchmark/stress/global cleanup.
+PASS:
+- Backend: go test ./internal/agent/config ./internal/agent ./internal/agent/state.
+- python -m unittest discover -s scripts -p test_agent_admin.py — 4 tests.
+- WSL: bash scripts/build-agent-release.sh --control-plane-url http://127.0.0.1:8080 --output-dir dist/aiwm-agent-0.2.0-linux-amd64-checked.
+- bash -n scripts/build-agent-release.sh scripts/install-agent-linux.sh scripts/test-agent-install.sh.
+- Tại artifact directory: sha256sum -c SHA256SUMS — 4 files OK.
+- Docker Debian bullseye-slim: production aiwm-agent --version; --check không Docker/NVML => DEGRADED/exit 1.
+- Docker buildpack-deps:bullseye, network none, release/test script bind read-only: bash /test.sh — installer positive/no-overwrite với probe stub.
+- Compose config: CP/Console bind 0.0.0.0 được, PostgreSQL vẫn 127.0.0.1; không start/recreate deployment.
+- Docker manifest nvidia/cuda:12.4.1-base-ubuntu22.04 có linux/amd64.
+- Các temporary test containers dùng --rm, không mount Docker socket hoặc GPU host.
 
-## Demo URLs
+Lỗi build đã xử lý: tag Go bullseye không tồn tại; apt mirror Bullseye trả 404; builder cuối dùng compiler image đã có dependency. WSL thiếu Docker socket được xử lý bằng Docker Desktop CLI fallback. Không restart Docker/driver hoặc global cleanup.
 
-Console http://127.0.0.1:3000/login; CP http://127.0.0.1:8080; health /healthz; PostgreSQL localhost:15432.
+## Artifact Path
 
-## Demo Accounts
+dist/aiwm-agent-0.2.0-linux-amd64-checked/
+- aiwm-agent (0.2.0, linux/amd64, CGO)
+- install-agent-linux.sh
+- aiwm-agent.service
+- BUILD_INFO.txt
+- SHA256SUMS
 
-admin/vtt/vds/vtnet/vtit — password mẫu công khai `AIWM-Demo-2026!`.
-Xem [DEMO_ACCOUNTS.md](DEMO_ACCOUNTS.md). Không dùng cho production.
+dist/ được gitignore; không commit binary/token.
+
+## Control Plane URL Config
+
+AIWM_CONTROL_PLANE_URL > internal/agent/config.ReleaseControlPlaneURL > http://localhost:8080.
+Release build inject -X github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent/config.ReleaseControlPlaneURL.
+Artifact validation dùng loopback; central deployment cần URL reachable từ GPU host.
+
+## Install Command
+
+Trên GPU host, sau nhận release và enrollment riêng:
+
+~~~bash
+sudo ./install-agent-linux.sh --binary ./aiwm-agent --enrollment-token-file "$HOME/aiwm-enrollment.token"
+sudo /usr/local/bin/aiwm-agent --check
+sudo systemctl enable --now aiwm-agent
+~~~
+
+URL optional --control-plane-url; có thể bỏ token options để nhập ẩn. Giữ /etc/aiwm-agent/agent.env và /var/lib/aiwm-agent qua restart.
+
+## Demo URLs / Demo Accounts
+
+Fake demo lịch sử: http://127.0.0.1:3000/login; xem DEMO_ACCOUNTS.md. Phiên này không khởi động lại stack đang dừng.
 
 ## Files Changed
 
-Phase A: compose.yaml; scripts/configure.py, acceptance.py (SessionAPI), demo.py, demo-up.sh, demo-down.sh; config/demo-users.json; demo/scenarios/multi-server.json; backend go.mod/go.sum và memory/store_test.go; frontend tests/e2e/demo.spec.ts; docs/DEMO_ACCOUNTS.md, TESTING_RUNBOOK.md, IMPLEMENTATION_STATUS.md; README.md.
-Giữ nguyên thay đổi có sẵn từ phiên resume trước; checkpoint chỉ stage phần của Phase A.
+- Backend Dockerfile.agent-release.
+- scripts/build-agent-release.sh; mode executable cho install-agent-linux.sh; agent-admin.py; test_agent_admin.py; test-agent-install.sh; .gitattributes.
+- demo/workloads/real-gpu-smoke.json.
+- docs/TESTING_RUNBOOK.md, SYSTEM_DESIGN.md, TECH_STACK.md, IMPLEMENTATION_STATUS.md; README documentation index.
+- Không sửa policy/scheduler/frontend/runtime ownership.
 
 ## NEXT STEP
 
-NEXT STEP = real GPU server support / central Agent release.
-Đọc trực tiếp `internal/agent/config/config.go`, `cmd/aiwm-agent/main.go`, `deploy/agent/aiwm-agent.service` trong backend, rồi thêm `scripts/build-agent-release.sh`, `scripts/install-agent-linux.sh`. URL: env override > build default > localhost. Không sửa lại fake demo đã PASS.
+Trên máy AIWM có URL CP thật, chạy:
+bash scripts/build-agent-release.sh --control-plane-url "$CONTROL_PLANE_URL" --output-dir dist/agent-release-real-01
+Sau đó theo TESTING_RUNBOOK.md mục “REAL GPU SERVER E2E — VTT-GPU-01” trên Linux NVIDIA host thật. Không clone/build trên GPU host.
 
 ---
 

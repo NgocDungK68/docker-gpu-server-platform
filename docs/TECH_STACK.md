@@ -161,4 +161,19 @@ Paths `internal/` và `cmd/` dưới đây thuộc backend; `src/` thuộc front
 [postcss]: ../AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/postcss.config.mjs
 [chart]: ../AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/charts/gpu-state-chart.tsx
 
-PostgreSQL phù hợp cho metadata có unique key/foreign key và enrollment transaction; runtime accounting vẫn dùng store đang có. go-nvml là Go binding, không phải driver. Preflight dùng API/file reads; không chạy CUDA probe. Task mới chưa build hoặc chạy kiểm chứng.
+PostgreSQL phù hợp cho metadata có unique key/foreign key và enrollment transaction; runtime accounting vẫn dùng store đang có. go-nvml là Go binding, không phải driver. Preflight dùng API/file reads; không chạy CUDA probe. Release build đã được kiểm chứng; CUDA execution trên GPU host thật còn cần kiểm tra theo runbook.
+
+## Phát hành Agent và yêu cầu trên GPU host
+
+| Nơi chạy | Công nghệ/thành phần cần có | Vai trò |
+|---|---|---|
+| Development/CI | Bash, Docker/BuildKit; Go 1.26.6 + GCC trong builder | Build generic production Agent với CGO; inject default Control Plane URL. |
+| Builder ABI | buildpack-deps:bullseye, glibc 2.31 | Tạo Linux amd64 artifact; không mang mock NVML vào release. |
+| GPU server runtime | Prebuilt aiwm-agent, glibc tương thích, CA trust cho HTTPS | Chạy Agent; **không cần Go compiler, source hoặc npm**. |
+| GPU server runtime | Docker Engine, NVIDIA Driver/NVML, GPU, NVIDIA Container Toolkit/runtime nvidia | Inventory và thực thi container được cấp GPU. |
+| Linux service | systemd nếu có; account aiwm-agent + group docker | Nạp config bảo vệ và restart riêng Agent khi process lỗi. |
+| Máy quản trị | Python standard library + public HTTP API | Cấp enrollment riêng và gửi/quan sát workload smoke qua scripts/agent-admin.py. |
+
+Đã build và chạy --version trên baseline Debian/glibc 2.31. Ubuntu/Debian và RHEL/Rocky/Alma là target có điều kiện ABI/dependencies phù hợp; chưa chứng nhận GPU thật hoặc mọi distro. ARM64/musl chưa được chứng nhận.
+
+Nguồn: [build-agent-release.sh](../scripts/build-agent-release.sh), [install-agent-linux.sh](../scripts/install-agent-linux.sh), [Dockerfile.agent-release](../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/Dockerfile.agent-release), internal/agent/config/config.go (ReleaseControlPlaneURL), cmd/aiwm-agent/main.go (--check/--version). Lệnh triển khai: [TESTING_RUNBOOK](TESTING_RUNBOOK.md).

@@ -1,5 +1,8 @@
 # Build trên máy AIWM/CI, không chạy trên GPU host.
-FROM golang:1.26.6-bullseye AS build
+FROM golang:1.26.6-bookworm AS toolchain
+FROM buildpack-deps:bullseye AS build
+COPY --from=toolchain /usr/local/go /usr/local/go
+ENV PATH=/usr/local/go/bin:$PATH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

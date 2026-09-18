@@ -105,10 +105,10 @@ Queue theo policy lane → Necessity → auxiliary priority → CreatedAt/ID; us
 | [SYSTEM_DESIGN.md](docs/SYSTEM_DESIGN.md) | Kiến trúc canonical, ownership, onboarding, failure/reconnect và provisioning. |
 | [ALGORITHMS.md](docs/ALGORITHMS.md) | Policy, queue, organization hard filter, placement và reservation theo source. |
 | [DOMAIN_MODEL.md](docs/DOMAIN_MODEL.md) | Entities, quan hệ, state và invariant của domain. |
-| [TECH_STACK.md](docs/TECH_STACK.md) | Công nghệ thực dùng và nhiệm vụ từng tầng. |
+| [TECH_STACK.md](docs/TECH_STACK.md) | Công nghệ từng tầng; phân biệt máy build với GPU host không cần Go compiler. |
 | [CORPORATE_POLICY.md](docs/CORPORATE_POLICY.md) | Policy baseline của project, Necessity và các hệ số ưu tiên. |
 | [API_TESTING_POSTMAN.md](docs/API_TESTING_POSTMAN.md) | Contract auth/tenancy/enrollment và Postman. |
-| [TESTING_RUNBOOK.md](docs/TESTING_RUNBOOK.md) | Lệnh chạy local, fake GPU, GPU Linux thật và failure tests. |
+| [TESTING_RUNBOOK.md](docs/TESTING_RUNBOOK.md) | Cách deploy Control Plane, build/cài Agent release, chạy fake/real GPU và failure tests. |
 | [DEMO_ACCOUNTS.md](docs/DEMO_ACCOUNTS.md) | User/password mẫu và đơn vị để đăng nhập demo. |
 | [IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md) | DONE/PARTIAL/TODO, checkpoint và bước tiếp tục. |
 

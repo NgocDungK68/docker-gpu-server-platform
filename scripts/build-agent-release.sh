@@ -17,17 +17,36 @@ if [[ -n "$url" && ! "$url" =~ ^https?://[a-zA-Z0-9.-]+(:[0-9]+)?/?$ ]]; then
   echo "URL phải là HTTP(S) origin, không credentials/query/path; dùng hostname hoặc IPv4." >&2
   exit 2
 fi
-command -v docker >/dev/null || { echo "Máy build cần Docker Engine/BuildKit." >&2; exit 1; }
+docker_command=docker
+windows_cli=false
+# WSL có thể chưa bật integration; dùng Docker Desktop CLI của Windows nếu có.
+if ! docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+  if command -v docker.exe >/dev/null && command -v wslpath >/dev/null && docker.exe version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    docker_command=docker.exe
+    windows_cli=true
+  else
+    echo "Máy build cần Docker Engine/BuildKit đang chạy; kiểm tra Docker Desktop WSL integration." >&2
+    exit 1
+  fi
+fi
 version="$(sed -n 's/^const agentVersion = "\([^"]*\)".*/\1/p' "$backend/cmd/aiwm-agent/main.go")"
 [[ "$version" =~ ^[0-9A-Za-z._-]+$ ]] || { echo "Không xác định được Agent version." >&2; exit 1; }
 output="${output:-$root/dist/aiwm-agent-$version-linux-amd64}"
 [[ ! -e "$output" ]] || { echo "Output đã tồn tại; giữ nguyên. Dùng --output-dir khác." >&2; exit 1; }
 mkdir -p "$output"
 output="$(cd "$output" && pwd)"
-docker build --platform linux/amd64 --target artifact \
+context="$backend"
+dockerfile="$backend/Dockerfile.agent-release"
+destination="$output"
+if "$windows_cli"; then
+  context="$(wslpath -w "$context")"
+  dockerfile="$(wslpath -w "$dockerfile")"
+  destination="$(wslpath -w "$destination")"
+fi
+"$docker_command" build --platform linux/amd64 --target artifact \
   --build-arg "CONTROL_PLANE_URL=$url" \
-  --output "type=local,dest=$output" \
-  -f "$backend/Dockerfile.agent-release" "$backend"
+  --output "type=local,dest=$destination" \
+  -f "$dockerfile" "$context"
 cp "$root/scripts/install-agent-linux.sh" "$output/install-agent-linux.sh"
 cp "$backend/deploy/agent/aiwm-agent.service" "$output/aiwm-agent.service"
 chmod 755 "$output/aiwm-agent" "$output/install-agent-linux.sh"
