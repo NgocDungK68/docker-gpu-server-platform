@@ -11,6 +11,9 @@ import (
 // implementation is used for the MVP; a PostgreSQL adapter can replace it
 // without changing HTTP handlers, scheduling policy, or agent protocol.
 type Repository interface {
+	// ReplanReservations runs a pure planning callback on a consistent snapshot and
+	// commits all future reservation changes atomically. Callback must not call Repository.
+	ReplanReservations(ctx context.Context, at time.Time, plan ReservationPlanner) (int, error)
 	UpsertServer(ctx context.Context, server domain.Server) (domain.Server, error)
 	AuthenticateAgent(ctx context.Context, agentID, token string) error
 	Heartbeat(ctx context.Context, agentID string, at time.Time) (domain.Server, error)
@@ -34,3 +37,5 @@ type Repository interface {
 	LeaseCommands(ctx context.Context, agentID string, now time.Time, lease time.Duration, limit int) ([]domain.Command, error)
 	AckCommand(ctx context.Context, agentID, commandID string, ack domain.CommandAckRequest, at time.Time) (domain.Command, error)
 }
+
+type ReservationPlanner func(jobs []domain.Job, servers []domain.Server) ([]domain.ReservationPlan, error)

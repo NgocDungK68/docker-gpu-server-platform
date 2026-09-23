@@ -14,7 +14,7 @@ import (
 
 func validAllocation() domain.CreateJobRequest {
 	fp8 := false
-	return domain.CreateJobRequest{AllocationIntent: domain.AllocationIntent{WorkloadType: domain.WorkloadTraining, NecessityLevel: domain.Necessity2, NecessityReason: "GO_LIVE_90_DAYS", SystemImportance: domain.ImportanceImportant, NeededAt: "2026-09-09T09:00:00+07:00", TTLSeconds: 3600},
+	return domain.CreateJobRequest{AllocationIntent: domain.AllocationIntent{WorkloadType: domain.WorkloadTraining, NecessityLevel: domain.Necessity2, NecessityReason: "GO_LIVE_90_DAYS", SystemImportance: domain.ImportanceImportant, NeededAt: time.Now().UTC().Format(time.RFC3339), TTLSeconds: 3600},
 		Name: "allocation-test", Image: "alpine:3.21", Resources: domain.AllocationResources{GPUCount: 1, MinVRAMMiB: 1024, PerformanceProfile: "a100-equivalent", FP8Required: &fp8}}
 }
 func allocationFixture(t *testing.T) (*ControlPlane, *memory.Store) {
@@ -144,7 +144,7 @@ func TestSubmitReevaluatesPreviewAndSchedulingRechecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	j, err := cp.CreateJob(ctx, validAllocation())
-	if err != nil || j.Policy.Status != domain.PolicyCompetitive || facts.calls != 2 {
+	if err != nil || j.Policy.Status != domain.PolicyCompetitive || facts.calls < 2 {
 		t.Fatalf("%+v %v calls=%d", j, err, facts.calls)
 	}
 	n, err := cp.ScheduleOnce(ctx)

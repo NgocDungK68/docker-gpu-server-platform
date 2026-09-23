@@ -1,6 +1,6 @@
 """Lab AIWM nhiều server: cấu hình, seed, enrollment, Agent Sim và kiểm thử thật."""
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -293,10 +293,70 @@ def failure(catalog):
         api("/auth/logout", {})
 
 
+
+def planning(catalog, base):
+    """Kiểm chứng lịch tương lai qua API thật; chỉ hủy các Job do scenario này tạo."""
+    api = login(next(u for u in catalog["users"] if u["username"] == "vtt"), base)
+    created = []
+    passed = []
+    def ok(message):
+        passed.append(message)
+        print("PASS " + message, flush=True)
+    def job(jid):
+        return api("/jobs/" + jid)
+    try:
+        servers = api("/servers")
+        server = next(s for s in servers if s["machineId"] == "vtt-gpu-01")
+        assert server["schedulable"] and sum(g["state"] == "FREE" for g in server["gpus"]) == 3, "Cần 3 H100 rảnh trên vtt-gpu-01; không tự dừng Job khác"
+        external = {(x["serverId"], x["container"]["id"]): x["container"]["state"] for x in api("/containers?origin=LEGACY")}
+        start = datetime.now(timezone.utc) + timedelta(seconds=45)
+        def submit(level):
+            result = api("/jobs", {"name": "planning-" + str(level) + "-" + str(time.time_ns()), "image": "alpine:3.21",
+                "command": ["sh", "-c", "sleep 300"], "resources": {"gpuCount": 3, "minVramMiB": 65536, "performanceProfile": "h100-equivalent", "fp8Required": True},
+                "workloadType": "TRAINING", "necessityLevel": "NECESSITY_" + str(level), "necessityReason": "CUSTOM",
+                "necessityExplanation": "Demo xung đột cùng khoảng thời gian", "systemImportance": "IMPORTANT",
+                "neededAt": start.isoformat(), "ttlSeconds": 30})
+            created.append(result["id"])
+            return result["id"]
+        a = submit(2)
+        wait(lambda: job(a).get("assignment"), "A chưa có reservation")
+        lower = submit(3)
+        b = submit(1)
+        planned = wait(lambda: j if (j := job(b)).get("assignment") else None, "N1 chưa thắng planning")
+        assert job(a)["status"] == job(lower)["status"] == "QUEUED"
+        assert planned["assignment"]["serverId"] == server["id"]
+        assert planned["organizationId"] == server["organizationId"] == api.identity["user"]["organizationId"]
+        ok("N1 thắng N2/N3; reservation đúng Organization")
+        while datetime.now(timezone.utc) < start:
+            for jid in created:
+                j = job(jid)
+                if datetime.now(timezone.utc) >= start:
+                    break
+                assert j["status"] not in ["STARTING", "RUNNING"]
+                assert not j.get("assignment", {}).get("commandId")
+            time.sleep(0.5)
+        ok("Không tạo START/container trước reservationStart")
+        running = wait(lambda: j if (j := job(b))["status"] == "RUNNING" else None, "B chưa RUNNING", timeout=25)
+        assert running["assignment"]["reservationState"] == "ALLOCATED"
+        ok("Đến giờ: START → Agent Sim → RUNNING")
+        stopped = wait(lambda: j if (j := job(b))["status"] == "STOPPED" else None, "Hết thời lượng chưa STOPPED", timeout=60)
+        assert stopped["assignment"]["reservationState"] == "RELEASED"
+        selected = set(stopped["assignment"]["gpuUuids"])
+        wait(lambda: all(g["state"] == "FREE" for g in api("/servers/" + server["id"])["gpus"] if g["uuid"] in selected), "GPU chưa FREE")
+        assert {(x["serverId"], x["container"]["id"]): x["container"]["state"] for x in api("/containers?origin=LEGACY")} == external
+        ok("Hết hạn → STOPPED → RELEASED/FREE; External giữ nguyên")
+        CACHE.mkdir(parents=True, exist_ok=True)
+        (CACHE / "last-planning-check.json").write_text(json.dumps({"at": datetime.now(timezone.utc).isoformat(), "passed": passed}, ensure_ascii=False, indent=2), encoding="utf-8")
+    finally:
+        for jid in created:
+            api("/jobs/" + jid + "/stop", {})
+        api("/auth/logout", {})
+
+
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["up", "down", "check", "failure"])
+    parser.add_argument("action", choices=["up", "down", "check", "failure", "planning"])
     parser.add_argument("--skip-build", action="store_true", help="Tái dùng image đã build khi source không đổi")
     parser.add_argument("--postgres-port", type=int, default=15432, help="Host port PostgreSQL demo; không đổi port nội bộ 5432")
     parser.add_argument("--set-demo-passwords", action="store_true", help="Chỉ lab: cho phép đổi password account cùng role/ownership sang password DEMO công khai")
@@ -304,6 +364,9 @@ def main():
     args = parser.parse_args()
     catalog = json.loads(ACCOUNTS.read_text(encoding="utf-8"))
     servers = json.loads(SCENARIO.read_text(encoding="utf-8"))["servers"]
+    if args.action == "planning":
+        planning(catalog, args.base_url)
+        return
     generate(servers)
     if args.action == "up":
         up(catalog, servers, args.skip_build, args.set_demo_passwords, args.postgres_port)

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { jobFormSchema, parseKeyValueLines, allocationFormSchema, allocationInput } from "../src/lib/jobs/form-schema.ts";
 import { allowedMutationOrigin, allowedPublicRoute } from "../src/lib/api/proxy-policy.ts";
 
-const valid = { name: "gpu-demo", image: "alpine:3.21", commandLines: "", environmentLines: "", gpuCount: 1, minVramMiB:1024, performanceProfile:"general", fp8Required:false, workloadType:"TRAINING",necessityLevel:"NECESSITY_2",necessityReason:"GO_LIVE_90_DAYS",necessityExplanation:"",systemImportance:"IMPORTANT",neededAt:"2026-09-09T09:00",ttlHours:1 };
+const valid = { name: "gpu-demo", image: "alpine:3.21", commandLines: "", environmentLines: "", gpuCount: 1, minVramMiB:1024, performanceProfile:"general", fp8Required:false, workloadType:"TRAINING",necessityLevel:"NECESSITY_2",necessityReason:"GO_LIVE_90_DAYS",necessityExplanation:"",systemImportance:"IMPORTANT",neededAt:new Date(Date.now() + 3600000 - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16),ttlHours:1 };
 
 test("same-origin mutation works for inbound localhost and IP hosts, rejects foreign origins", () => {
  assert.equal(allowedMutationOrigin("http://127.0.0.1:3000", "127.0.0.1:3000"), true);
@@ -49,4 +49,9 @@ test("proxy allows public routes but rejects Agent, Docker, traversal and unsupp
  assert.equal(allowedPublicRoute("POST", ["jobs", "job_123", "stop"]), true);
  for (const path of [["agents", "srv_123", "commands"], ["docker"], ["..", "agents"], ["jobs%2f.."], ["jobs", ".", "stop"]]) assert.equal(allowedPublicRoute("GET", path), false);
  assert.equal(allowedPublicRoute("DELETE", ["jobs", "job_123"]), false);
+});
+
+test("time planning rejects stale start and keeps half-hour duration", () => {
+ assert.equal(jobFormSchema.safeParse({...valid,neededAt:"2020-01-01T08:00"}).success,false);
+ assert.equal(allocationInput({...valid,ttlHours:0.5}).ttlSeconds,1800);
 });

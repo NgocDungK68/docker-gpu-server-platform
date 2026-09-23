@@ -1,5 +1,56 @@
 # Runbook kiểm thử AIWM
 
+
+## Kiểm thử Resource Allocation Planning theo thời gian (23/09/2026)
+
+**Checkpoint đã kiểm chứng:** backend focused tests với clock giả PASS; frontend typecheck + contract tests PASS. Docker stack đang dừng khi kiểm tra phiên này; chưa chạy lại scenario time-planning trên Docker/NVML. Không dùng PASS Fake Demo lịch sử để khẳng định feature mới đã E2E PASS.
+
+### Backend — không cần Docker/GPU và không chờ nhiều giờ
+
+Từ workspace root:
+
+~~~powershell
+cd AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane
+go test ./internal/domain ./internal/application ./internal/httpapi ./internal/store/memory ./internal/store/durable ./internal/policy
+~~~
+
+Các test trong application/planning_test.go cover: future/no early, touching/overlap, N1/N2, auxiliary cùng Necessity, isolation, dispatch đúng start, stale Agent/external/unknown/unhealthy, không preempt RUNNING, hết duration/STOP/release, delayed poll, lost ACK, concurrency, preview read-only. durable/planning_test.go kiểm atomic batch/disk rollback và restart giữ calendar.
+
+Không expose API đổi clock. Test tự tăng c.now; production dùng clock thật. neededAt phải là RFC3339 có timezone; TTLSeconds là duration tính từ requested start, không tính từ RUNNING.
+
+### Fake nhiều server — scenario thực qua public API
+
+Từ workspace root, Docker Desktop Linux containers/WSL sẵn sàng:
+
+~~~bash
+python scripts/demo.py up
+python scripts/demo.py planning
+~~~
+
+Trong WSL dùng python3 thay python nếu cần. up dùng helper đã có: build/start demo, metadata seed, enrollment và Agent Sim; không dùng --skip-build khi source CP thay đổi. Không chạy up nếu chỉ muốn unit tests.
+
+planning yêu cầu vtt-gpu-01 fresh, 3 H100 FREE còn lại sau một existing container. Không tự dừng Job khác, drain host hoặc sửa GPU state để ép demo. Scenario dùng credentials DEMO từ config/demo-users.json.
+
+| Mốc | Kết quả cần thấy |
+|---|---|
+| Tạo A/N2, start now+45s, duration 30s | ASSIGNED, assignment PLANNED; commandId rỗng; physical GPU có thể vẫn FREE. |
+| Thêm C/N3 và B/N1 cùng interval | B giữ 3 GPU, A/C QUEUED; assigned server cùng Organization VTT. |
+| Trước start | Không STARTING/RUNNING hoặc START command cho ba Job. |
+| Đến start | B → STARTING → Agent Sim/runtime → RUNNING/ALLOCATED. |
+| Đến end | Graceful STOP → STOPPED/RELEASED → GPU FREE; external identity/state giữ nguyên. |
+
+Script in từng PASS và lưu .cache/multi-server-demo/last-planning-check.json. Finally chỉ stop/cancel ba Job do lần chạy tạo, không cleanup Docker resource khác. Tổng khoảng 75–100 giây; lỗi assertion là FAIL thực, không ghi WORKING. Nếu không có đủ 3 H100 FREE, script dừng với reason; xử lý Job của chính bạn bằng UI nếu phù hợp rồi chạy lại.
+
+UI: mở Workloads, lọc “Đã lên lịch”, xem start/end/thời lượng. Trạng thái “Đã lên lịch · Chưa chạy” không có nghĩa container đã chạy. Form giữ execution fields và các mức 0.5/1/2/4/8 giờ hoặc duration số hợp lệ.
+
+### Linux GPU thật
+
+Giữ flow release/install/enrollment bên dưới. Khi submit real-gpu-smoke qua UI, chọn start trong vài phút tới và duration phù hợp. Trước start: ASSIGNED/PLANNED, chưa có container mới của Job. Đến start: kiểm docker ps, nvidia-smi và API/UI. EndAt gửi STOP; pull/start/stop có latency nên không bảo đảm runtime kết thúc chính xác tại EndAt.
+
+Nếu Agent/CP offline: workload vẫn chạy và GPU không tự FREE. Khi reconnect/full inventory, CP revalidate phần interval còn lại hoặc request STOP nếu hết. Job khác có reservation chạm endpoint phải chờ GPU thực tế an toàn. Không stop existing/legacy workload để đáp ứng lịch.
+
+Lệnh agent-admin.py smoke hiện đặt neededAt=now; muốn minh họa future dùng UI hoặc folder Postman Planning. Job cũ thiếu Assignment.StartAt/EndAt không tự được áp deadline mới; tạo Job mới để test time planning.
+
 ## FAKE multi-server — đường chạy đã kiểm chứng (17/09/2026)
 
 Dùng mục này cho demo hiện tại; các bước thủ công phía dưới chỉ để đối chiếu/development. Phase A đã chạy thật trên Windows + Docker Desktop và Ubuntu WSL2.

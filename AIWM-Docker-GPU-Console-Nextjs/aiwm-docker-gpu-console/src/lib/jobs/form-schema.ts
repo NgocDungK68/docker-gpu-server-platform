@@ -49,6 +49,9 @@ export const jobFormSchema = z.object({
   neededAt: z.string().refine(validLocalDateTime, "Chọn ngày và giờ hợp lệ theo giờ địa phương"),
   ttlHours: z.number().positive("Thời lượng phải lớn hơn 0").refine(value => Number.isSafeInteger(value * 3600), "Thời lượng phải quy đổi được thành số giây nguyên"),
 }).strict().superRefine((value, ctx) => {
+  if (validLocalDateTime(value.neededAt) && new Date(value.neededAt).getTime() < Date.now() - 60_000) {
+    ctx.addIssue({ code: "custom", path: ["neededAt"], message: "Chọn thời điểm bắt đầu từ hiện tại hoặc trong tương lai" });
+  }
   if (value.necessityReason === "CUSTOM" && !value.necessityExplanation.trim()) {
     ctx.addIssue({ code: "custom", path: ["necessityExplanation"], message: "Nhập giải trình cho lý do khác" });
   }

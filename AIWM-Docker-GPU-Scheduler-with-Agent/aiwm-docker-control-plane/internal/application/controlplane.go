@@ -7,7 +7,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -35,7 +34,7 @@ type ControlPlane struct {
 }
 
 type Options struct {
-	Metadata          ports.MetadataRepository
+	Metadata ports.MetadataRepository
 	// PlacementPolicy optionally replaces the configured scorer at composition time.
 	PlacementPolicy   SchedulingPolicy
 	Policy            policy.Evaluator
@@ -101,14 +100,16 @@ func (c *ControlPlane) RegisterAgent(ctx context.Context, enrollmentToken string
 	now := c.now().UTC()
 	var owner domain.ServerOwnership
 	if c.metadata != nil {
-		owner,err = c.metadata.BindEnrollment(ctx,tokenHash(enrollmentToken),request.MachineID,now)
-		if err != nil { return agentv1.RegisterResponse{},err }
+		owner, err = c.metadata.BindEnrollment(ctx, tokenHash(enrollmentToken), request.MachineID, now)
+		if err != nil {
+			return agentv1.RegisterResponse{}, err
+		}
 		agentID = owner.ServerID
-		request.Name,request.Labels = owner.DisplayName,owner.Labels
+		request.Name, request.Labels = owner.DisplayName, owner.Labels
 	}
 	server, err := c.repository.UpsertServer(ctx, domain.Server{
 		OrganizationID: owner.OrganizationID,
-		ID: agentID, MachineID: request.MachineID, Name: request.Name, Address: request.Address,
+		ID:             agentID, MachineID: request.MachineID, Name: request.Name, Address: request.Address,
 		AgentVersion: request.AgentVersion, Labels: request.Labels, Status: domain.ServerOnline,
 		LastHeartbeatAt: now, TokenHash: sha256.Sum256([]byte(token)),
 	})
@@ -147,15 +148,22 @@ func (c *ControlPlane) ReportInventory(ctx context.Context, agentID string, repo
 
 func (c *ControlPlane) ListServers(ctx context.Context) ([]domain.Server, error) {
 	servers, err := c.repository.ListServers(ctx)
-	if err!=nil { return nil,err }
-	enabled,err:=c.enabledOrganizations(ctx)
-	if err!=nil { return nil,err }
+	if err != nil {
+		return nil, err
+	}
+	enabled, err := c.enabledOrganizations(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := []domain.Server{}
-	for _,server := range servers {
-		if domain.CanAccess(ctx,server.OrganizationID) {
-			server=c.presentServer(server)
-			if c.metadata!=nil && !enabled[server.OrganizationID] { server.SchedulingReady=false; server.SchedulingReason="organization không hoạt động hoặc chưa có metadata" }
-			result=append(result,server)
+	for _, server := range servers {
+		if domain.CanAccess(ctx, server.OrganizationID) {
+			server = c.presentServer(server)
+			if c.metadata != nil && !enabled[server.OrganizationID] {
+				server.SchedulingReady = false
+				server.SchedulingReason = "organization không hoạt động hoặc chưa có metadata"
+			}
+			result = append(result, server)
 		}
 	}
 	return result, err
@@ -163,18 +171,30 @@ func (c *ControlPlane) ListServers(ctx context.Context) ([]domain.Server, error)
 
 func (c *ControlPlane) GetServer(ctx context.Context, id string) (domain.Server, error) {
 	server, err := c.repository.GetServer(ctx, id)
-	if err == nil && !domain.CanAccess(ctx,server.OrganizationID) { return domain.Server{},domain.ErrNotFound }
-	if err!=nil { return domain.Server{},err }
-	server=c.presentServer(server)
-	if c.metadata!=nil {
-		enabled,e:=c.enabledOrganizations(ctx); if e!=nil { return domain.Server{},e }
-		if !enabled[server.OrganizationID] { server.SchedulingReady=false; server.SchedulingReason="organization không hoạt động hoặc chưa có metadata" }
+	if err == nil && !domain.CanAccess(ctx, server.OrganizationID) {
+		return domain.Server{}, domain.ErrNotFound
 	}
-	return server,nil
+	if err != nil {
+		return domain.Server{}, err
+	}
+	server = c.presentServer(server)
+	if c.metadata != nil {
+		enabled, e := c.enabledOrganizations(ctx)
+		if e != nil {
+			return domain.Server{}, e
+		}
+		if !enabled[server.OrganizationID] {
+			server.SchedulingReady = false
+			server.SchedulingReason = "organization không hoạt động hoặc chưa có metadata"
+		}
+	}
+	return server, nil
 }
 
 func (c *ControlPlane) SetServerDrained(ctx context.Context, id string, drained bool) (domain.Server, error) {
-	if _,err := c.GetServer(ctx,id); err != nil { return domain.Server{},err }
+	if _, err := c.GetServer(ctx, id); err != nil {
+		return domain.Server{}, err
+	}
 	server, err := c.repository.SetServerDrained(ctx, id, drained)
 	return c.presentServer(server), err
 }
@@ -222,14 +242,16 @@ func (c *ControlPlane) CreateJob(ctx context.Context, request domain.CreateJobRe
 }
 
 func (c *ControlPlane) GetJob(ctx context.Context, id string) (domain.Job, error) {
-	job,err:=c.repository.GetJob(ctx,id)
-	if err==nil && !domain.CanAccess(ctx,job.OrganizationID) { return domain.Job{},domain.ErrNotFound }
-	return job,err
+	job, err := c.repository.GetJob(ctx, id)
+	if err == nil && !domain.CanAccess(ctx, job.OrganizationID) {
+		return domain.Job{}, domain.ErrNotFound
+	}
+	return job, err
 }
 
 func (c *ControlPlane) ListJobs(ctx context.Context) ([]domain.Job, error) {
-	jobs,err:=c.repository.ListJobs(ctx)
-	return scopedJobs(ctx,jobs),err
+	jobs, err := c.repository.ListJobs(ctx)
+	return scopedJobs(ctx, jobs), err
 }
 
 func (c *ControlPlane) Queue(ctx context.Context) ([]domain.Job, error) {
@@ -237,70 +259,32 @@ func (c *ControlPlane) Queue(ctx context.Context) ([]domain.Job, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.policy.Order(ctx, scopedJobs(ctx,jobs), c.now().UTC())
+	return c.policy.Order(ctx, scopedJobs(ctx, jobs), c.now().UTC())
 }
 
+// ScheduleOnce plans reservations before triggering only executions whose start has arrived.
 func (c *ControlPlane) ScheduleOnce(ctx context.Context) (int, error) {
-	jobs, err := c.Queue(ctx)
+	if err := c.processReservations(ctx); err != nil {
+		return 0, err
+	}
+	enabled, err := c.enabledOrganizations(ctx)
 	if err != nil {
 		return 0, err
 	}
-	servers, err := c.repository.ListServers(ctx)
+	now := c.now().UTC()
+	count, err := c.repository.ReplanReservations(ctx, now, func(jobs []domain.Job, servers []domain.Server) ([]domain.ReservationPlan, error) {
+		return c.planReservations(ctx, jobs, servers, enabled, now)
+	})
 	if err != nil {
-		return 0, err
+		return count, err
 	}
-	assigned := 0
-	enabled,err := c.enabledOrganizations(ctx)
-	if err!=nil { return 0,err }
-	for _, job := range jobs {
-		if c.metadata != nil && !enabled[job.OrganizationID] { continue }
-		placement, planErr := c.scheduler.Plan(job, servers, c.now().UTC())
-		if errors.Is(planErr, domain.ErrInsufficientGPU) {
-			_, _ = c.repository.SetJobStatus(
-				ctx,
-				job.ID,
-				domain.JobQueued,
-				planErr.Error(),
-				c.now().UTC(),
-			)
-			continue
-		}
-		if planErr != nil {
-			return assigned, planErr
-		}
-		payload, err := json.Marshal(agentv1.StartContainerPayload{
-			JobID: job.ID, Name: "aiwm-" + job.ID, Image: job.Image, Command: job.Command,
-			Environment: job.Environment, GPUUUIDs: placement.GPUUUIDs,
-			CPUMilli: job.Resources.CPUMilli, MemoryMiB: job.Resources.MemoryMiB,
-			Labels: map[string]string{"aiwm.managed": "true", "aiwm.job-id": job.ID},
-		})
-		if err != nil {
-			return assigned, err
-		}
-		commandID, err := newID("cmd")
-		if err != nil {
-			return assigned, err
-		}
-		command := domain.Command{
-			ID: commandID, AgentID: placement.ServerID, Type: domain.CommandStartContainer,
-			Status: domain.CommandPending, Payload: payload, CreatedAt: c.now().UTC(),
-		}
-		placement.Policy = job.Policy
-		if _, err := c.repository.CommitAssignment(ctx, job.ID, placement, command, c.now().UTC()); err != nil {
-			if errors.Is(err, domain.ErrConflict) {
-				servers, _ = c.repository.ListServers(ctx)
-				continue
-			}
-			return assigned, err
-		}
-		assigned++
-		servers, _ = c.repository.ListServers(ctx)
-	}
-	return assigned, nil
+	return count, c.processReservations(ctx)
 }
 
 func (c *ControlPlane) StopJob(ctx context.Context, id string) (domain.Job, error) {
-	if _,err:=c.GetJob(ctx,id); err!=nil { return domain.Job{},err }
+	if _, err := c.GetJob(ctx, id); err != nil {
+		return domain.Job{}, err
+	}
 	payload, err := json.Marshal(agentv1.StopContainerPayload{JobID: id, GraceSeconds: 30})
 	if err != nil {
 		return domain.Job{}, err
@@ -334,7 +318,11 @@ func (c *ControlPlane) AckCommand(ctx context.Context, agentID, commandID string
 }
 
 func (c *ControlPlane) Reconcile(ctx context.Context) (int, error) {
-	return c.repository.MarkStaleServers(ctx, c.now().UTC().Add(-c.offlineAfter))
+	changed, err := c.repository.MarkStaleServers(ctx, c.now().UTC().Add(-c.offlineAfter))
+	if err != nil {
+		return changed, err
+	}
+	return changed, c.processReservations(ctx)
 }
 
 func (c *ControlPlane) Summary(ctx context.Context) (domain.ClusterSummary, error) {
@@ -391,7 +379,7 @@ func (c *ControlPlane) Summary(ctx context.Context) (domain.ClusterSummary, erro
 	if len(summary.RecentEvents) > 20 {
 		summary.RecentEvents = summary.RecentEvents[:20]
 	}
-	summary.ServersOffline=summary.ServersTotal-summary.ServersOnline
+	summary.ServersOffline = summary.ServersTotal - summary.ServersOnline
 	return summary, nil
 }
 
@@ -403,7 +391,7 @@ func (c *ControlPlane) GPUs(ctx context.Context) ([]map[string]any, error) {
 	result := make([]map[string]any, 0)
 	for _, server := range servers {
 		for _, gpu := range server.GPUs {
-			result = append(result, map[string]any{"organizationId":server.OrganizationID,"serverId": server.ID, "serverName": server.Name, "serverStatus": server.Status, "gpu": gpu})
+			result = append(result, map[string]any{"organizationId": server.OrganizationID, "serverId": server.ID, "serverName": server.Name, "serverStatus": server.Status, "gpu": gpu})
 		}
 	}
 	return result, nil

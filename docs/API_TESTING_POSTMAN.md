@@ -2,6 +2,35 @@
 
 Cập nhật Organization/session/enrollment ngày 17/09/2026 bằng inspection tĩnh. Không chạy API, migration, Newman hoặc build/test trong task. Backend source là authority; xem [TESTING_RUNBOOK](TESTING_RUNBOOK.md) để khởi động PostgreSQL/CP/frontend/Agent.
 
+
+## Time-based planning — contract và Postman (23/09/2026)
+
+Request vẫn dùng neededAt + ttlSeconds; ttlSeconds là requestedDuration bằng giây. Không gửi thêm requestedDuration/organizationId/server/UUID/strategy. Khoảng thời gian [neededAt, neededAt + ttlSeconds). Start quá khứ quá 60 giây hoặc interval đã hết trả 400, error.fields. Giữ image/command/environment/resources hiện tại.
+
+| API / field | Hành vi |
+|---|---|
+| POST jobs/preview | Chạy planner hypothetical, không mutation. requestedStartAt/requestedEndAt, planningStatus AVAILABLE/CONFLICT. Không K/score/UUID. |
+| POST jobs | Re-evaluate, tạo QUEUED. Planning ticker mới giữ interval; chưa START sớm. |
+| GET jobs/{id} | requestedStartAt/requestedEndAt; assignment.startAt/endAt/reservationState. ASSIGNED + PLANNED + commandId rỗng = chưa thực thi. |
+| GET queue | Chỉ QUEUED; Job đã có future reservation nằm trong jobs, không trong queue. |
+| POST scheduler/run-once | ADMIN-only; lập/re-lập future reservations và chạy execution controller. assignedJobs đếm calendar assignments mới/đổi GPU, không phải số container đã RUNNING. |
+| POST jobs/{id}/stop | Cancel lịch chưa giao START; đang thực thi thì graceful STOP, chờ inventory rồi release. |
+
+Folder mới **Planning - Lịch tương lai và Policy** trong collection hiện có:
+
+1. Login VTT qua folder Organization, giữ access_token; current user lấy planning_org.
+2. A/N2 xin 3 H100 trên scenario vtt-gpu-01, start = now + 3 phút, duration = 60 giây.
+3. Đợi ticker 3 giây (GET, không gọi admin scheduler), kiểm A ASSIGNED/PLANNED/commandId rỗng.
+4. Thêm C/N3 rồi B/N1 cùng interval, đợi replan; B được giữ, A về QUEUED.
+5. GET server của B, Organization phải bằng planning_org. Chạy với cùng snapshot trống lịch cạnh tranh; không dừng Job khác để ép kết quả.
+6. Trước start không được STARTING/RUNNING. Sau start gửi request 11: RUNNING nếu Agent/resource vẫn safe.
+7. Sau end + thời gian xử lý STOP/inventory: STOPPED, assignment RELEASED; GPU FREE nếu không còn consumer.
+8. Cleanup 12–14 chỉ hủy/dừng ba Job của scenario; không xóa server/container ngoài test.
+
+Variables planning_start/planning_a/planning_b/planning_c/planning_org/planning_server được collection tự lưu. Không chứa password/token thật. Normal user không được gọi run-once; ticker production chạy mặc định mỗi 2 giây. Không chạy toàn bộ collection lịch sử vì có fixture/thao tác độc lập.
+
+Tự động hóa nhanh bằng public API thật: python scripts/demo.py planning, xem TESTING_RUNBOOK. Các test focused dùng clock giả, không sửa clock production/Agent.
+
 ## 1. Login, current user và logout
 
 Không public self-registration. Bootstrap admin đầu tiên qua CLI `aiwm-server --bootstrap-admin`; ADMIN cấp account còn lại.
@@ -579,12 +608,12 @@ GET /api/v1/containers
   "necessityLevel": "NECESSITY_2",
   "necessityReason": "GO_LIVE_90_DAYS",
   "systemImportance": "IMPORTANT",
-  "neededAt": "2026-09-09T09:00:00+07:00",
+  "neededAt": "{{planning_start}}",
   "ttlSeconds": 3600
 }
 ~~~
 
-Các fields bắt buộc: name/image, workloadType, resources.gpuCount/minVramMiB/performanceProfile/fp8Required, necessityLevel/necessityReason, systemImportance, neededAt, ttlSeconds. CUSTOM cần necessityExplanation. GPU/VRAM phải số nguyên >0; FP8 phải boolean (không null/string), profile hợp lệ. Backend yêu cầu TTL trong giới hạn và RFC3339 có múi giờ. Max GPU/TTL đọc Options, không giả định luôn 64/2592000. neededAt cho phép quá khứ; TTL chưa tự stop.
+Các fields bắt buộc: name/image, workloadType, resources.gpuCount/minVramMiB/performanceProfile/fp8Required, necessityLevel/necessityReason, systemImportance, neededAt, ttlSeconds. CUSTOM cần necessityExplanation. GPU/VRAM phải số nguyên >0; FP8 phải boolean (không null/string), profile hợp lệ. Backend yêu cầu TTL trong giới hạn và RFC3339 có múi giờ. Max GPU/TTL đọc Options, không giả định luôn 64/2592000. neededAt chỉ cho phép lệch quá khứ tối đa 60 giây; interval phải chưa hết. ttlSeconds tính EndAt và trigger STOP.
 
 400 INVALID_INPUT trả `error.fields` theo field, ví dụ:
 
@@ -858,7 +887,7 @@ GET /api/v1/queue
 **Response / Expected result**
 
 - 200; {"data":{"assignedJobs":0}} hoặc số commit thành công trong lượt này.
-- Body không được decode. Plan không reserve; CommitAssignment revalidate rồi atomically ghi GPU + Assignment + Job + Start command. ErrConflict được refresh/retry ở cycle sau; jobs/options cung cấp catalog/limits; không có API đổi strategy.
+- Body không được decode. Placement Plan thuần không reserve; ReplanReservations commit calendar trước; đến start CommitAssignment revalidate rồi atomically ghi GPU + STARTING + START. ErrConflict được refresh/retry ở cycle sau; jobs/options cung cấp catalog/limits; không có API đổi strategy.
 
 **Luồng xử lý**
 
@@ -866,7 +895,7 @@ GET /api/v1/queue
 POST /api/v1/scheduler/run-once
 → httpapi.Server.runScheduler
 → ControlPlane.ScheduleOnce → Scheduler.Plan
-→ Repository.ListQueuedJobs; ListServers; SetJobStatus; CommitAssignment
+→ Repository.ReplanReservations; CommitAssignment; RequestStop
 ~~~
 
 **Source code**

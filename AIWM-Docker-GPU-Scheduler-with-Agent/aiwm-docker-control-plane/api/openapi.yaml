@@ -1850,11 +1850,11 @@ components:
         neededAt:
           type: string
           format: date-time
-          description: RFC3339 có timezone, normalize UTC; cho phép quá khứ. Nhu cầu mong muốn, chưa là lịch start.
+          description: RFC3339 có timezone; start cố định, chuẩn hóa UTC. Chỉ chấp nhận quá khứ trong tolerance 60 giây và interval chưa kết thúc.
         ttlSeconds:
           type: integer
           minimum: 1
-          description: Thời lượng đăng ký, đơn vị giây. Maximum từ jobs/options (mặc định 2592000); chưa tự stop/reclaim.
+          description: Thời lượng cấp GPU tính từ neededAt, đơn vị giây; end loại trừ. Maximum từ jobs/options (mặc định 2592000). Hết hạn gửi STOP, release sau inventory xác nhận.
       additionalProperties: false
       description: Intent-based request; backend đánh giá lại policy và snapshot rồi tạo QUEUED. Scheduler cycle
         re-evaluate trước atomic reservation.
@@ -1951,6 +1951,12 @@ components:
     Assignment:
       type: object
       properties:
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
         serverId:
           type: string
         gpuUuids:
@@ -1965,6 +1971,7 @@ components:
         reservationState:
           type: string
           enum:
+          - PLANNED
           - RESERVED
           - ALLOCATED
           - RELEASED
@@ -1978,6 +1985,8 @@ components:
         reason:
           type: string
       required:
+      - startAt
+      - endAt
       - serverId
       - gpuUuids
       - commandId
@@ -1989,6 +1998,12 @@ components:
     Job:
       type: object
       properties:
+        requestedStartAt:
+          type: string
+          format: date-time
+        requestedEndAt:
+          type: string
+          format: date-time
         organizationId:
           type: string
           description: "Ownership do backend xác định; GPU suy ra từ Server."
@@ -2086,12 +2101,12 @@ components:
           description: ' Job cũ trước intent có thể mang zero value.'
         neededAt:
           type: string
-          description: RFC3339 có timezone, normalize UTC; cho phép quá khứ. Nhu cầu mong muốn, chưa là lịch start.
+          description: RFC3339 có timezone; start cố định, chuẩn hóa UTC. Chỉ chấp nhận quá khứ trong tolerance 60 giây và interval chưa kết thúc.
             Job cũ trước intent có thể mang zero value.
         ttlSeconds:
           type: integer
           minimum: 0
-          description: Thời lượng đăng ký, đơn vị giây. Maximum từ jobs/options (mặc định 2592000); chưa tự stop/reclaim.
+          description: Thời lượng cấp GPU tính từ neededAt, đơn vị giây; end loại trừ. Maximum từ jobs/options (mặc định 2592000). Hết hạn gửi STOP, release sau inventory xác nhận.
             Job cũ trước intent có thể mang zero value.
         necessityLabel:
           type: string
@@ -2365,6 +2380,15 @@ components:
     JobPreview:
       type: object
       properties:
+        planningStatus:
+          type: string
+          enum: [AVAILABLE, CONFLICT]
+        requestedStartAt:
+          type: string
+          format: date-time
+        requestedEndAt:
+          type: string
+          format: date-time
         workloadType:
           type: string
           enum:

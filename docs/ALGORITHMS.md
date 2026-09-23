@@ -61,6 +61,78 @@ Predicate O(1), lọc S Server O(S). Không thay complexity hoặc công thức 
 Công thức policy/strategy phía dưới giữ nguyên. Các ví dụ placement cũ phía dưới giả định Job và Server cùng organization không rỗng; không có fallback cross-organization. Business baseline được giải thích riêng trong [CORPORATE_POLICY.md](CORPORATE_POLICY.md).
 
 
+
+## T — Planning theo thời gian và execution (ACTIVE, 23/09/2026)
+
+### Mục tiêu và phạm vi
+
+Policy quyết định **Job nào được ưu tiên khi tranh tài nguyên**. Planning Scheduler quyết định **Server/GPU và khoảng thời gian giữ chỗ**. Execution controller quyết định **khi nào tạo START**, sau khi kiểm tra lại trạng thái hiện tại. Bốn công thức placement ở A15–A19 giữ nguyên; chúng chấm candidate của khoảng thời gian yêu cầu, không chỉ snapshot FREE hiện tại.
+
+### Đầu vào / đầu ra
+
+- Đầu vào: Job, neededAt, ttlSeconds, Policy, Server/GPU snapshot, Assignment của các Job khác, thời gian CP.
+- ttlSeconds chính là requestedDuration tính bằng giây; không thêm timeout song song. StartAt = neededAt; EndAt = neededAt + ttlSeconds.
+- Đầu ra planning: ASSIGNED + Assignment PLANNED, hoặc QUEUED với reason “Không đủ GPU an toàn trong khoảng thời gian yêu cầu”. Chưa tạo command.
+- Đầu ra execution: STARTING + Assignment RESERVED + GPU RESERVED + START_CONTAINER PENDING trong một transaction.
+
+### Hard constraints và overlap
+
+Interval nửa mở **[start,end)**:
+
+~~~text
+overlap(A, B) = A.start < B.end AND B.start < A.end
+~~~
+
+08:00–10:00 và 10:00–12:00 được giữ cùng GPU; 08:00–11:00 và 10:00–12:00 xung đột. Helper duy nhất: domain.TimeWindow.Overlaps.
+
+Order: **Policy → Organization → server freshness / capability → time availability → placement strategy → reservation**. Job.OrganizationID phải khác rỗng và bằng Server.OrganizationID. Policy không được vượt constraint này.
+
+GPU PLANNED không có state vật lý riêng: inventory vẫn có thể FREE. Calendar projection loại UUID có Assignment overlap. GPU RESERVED/ALLOCATED bởi AIWM có EndAt rõ ràng có thể được plan cho một khoảng tương lai sau EndAt; projection không thay đổi inventory. Legacy/unknown/unhealthy vẫn bị chặn. Đến giờ, execution luôn yêu cầu GPU thực tế FREE, không tin dự đoán đã kết thúc.
+
+### Comparator và pseudocode
+
+Policy giữ nguyên: lane → Necessity 1,2,3,4 → auxiliary giảm dần → CreatedAt tăng dần → ID tăng dần. Auxiliary = round(K_importance × K_quota × K_waiting × 1000)/1000. Chỉ so auxiliary khi cùng Necessity và lane.
+
+~~~text
+snapshot + lock runtime repository
+candidates = QUEUED + ASSIGNED/PLANNED có StartAt > now, CommandID rỗng
+frozen = các Assignment còn lại
+for job in policy.Order(candidates):
+    projected = CalendarServers(job, servers, frozen + plans trước, now)
+    placement = strategy.Plan(job, projected)
+    nếu đủ: lưu plan và thêm booking để Job sau kiểm overlap
+    nếu thiếu: QUEUED + reason
+validate tất cả plans; commit một batch, không tạo START
+
+execution tick:
+    nếu interval kết thúc: cancel chưa dispatch hoặc request STOP
+    nếu PLANNED và start <= now < end:
+        revalidate fresh/org/health/GPU thực tế
+        commit GPU RESERVED + STARTING + START command
+~~~
+
+Chỉ replan future; reservation đã bắt đầu được giữ nguyên đến khi thực thi an toàn hoặc hết interval. Retry không kéo dài EndAt. Không preempt RUNNING. Preview chạy cùng greedy planner trên bản copy, không commit; một request N1 có thể được preview là AVAILABLE dù N2 đang giữ lịch tương lai.
+
+### Ví dụ
+
+Hiện tại 08:00, cùng lane, một GPU phù hợp. A/N2 xin 14:00–16:00 và đã PLANNED. B/N1 tới lúc 09:00 xin cùng interval: B nhận PLANNED, A về QUEUED. Trước 14:00 không có START. Lúc 14:00 nếu inventory fresh và GPU safe: B STARTING → RUNNING. Lúc 16:00 gửi STOP; chỉ inventory xác nhận stopped/absent mới release. Job khác bắt đầu đúng 16:00 có thể phải chờ STOP được xác nhận, không cấp trùng GPU.
+
+### Complexity và giới hạn
+
+Không dùng interval tree. CalendarServers quét Server/GPU × bookings và membership UUID tuyến tính; với G GPU, R bookings, K UUID/booking: O(G × R × K) mỗi Job, cộng policy sort và placement hiện có. Batch revalidate lặp lại kiểm tra dưới mutex; durable thêm chi phí snapshot. Đây là single-writer MVP, callback planning phải không gọi ngược runtime Repository.
+
+Clock quyết định là clock CP; ticker mặc định scheduling 2s, reconcile 5s. Đây không phải realtime deadline: image pull/start và STOP graceful có độ trễ; CP/Agent mất liên lạc có thể kéo dài container quá EndAt. Không release hoặc cấp trùng vì mất kết nối. Đồng bộ clock host cần cho so sánh observed inventory với ACK.
+
+### Source mapping / tests
+
+- internal/domain/reservation.go: TimeWindow, RequestedWindow, Replannable, CalendarServers.
+- internal/application/planning.go: planReservations, processReservations.
+- internal/application/controlplane.go: ScheduleOnce, Reconcile.
+- internal/store/memory/planning.go: ReplanReservations, startDeliverableLocked.
+- internal/store/memory/store.go: CommitAssignment, LeaseCommands.
+- internal/store/memory/lifecycle.go: RequestStop, stopConfirmedLocked, reconcileObservedLocked.
+- application/planning_test.go, domain/reservation_test.go, durable/planning_test.go: thời gian giả, Policy, isolation, revalidation, expiration, concurrency, rollback/restart.
+
 ## Pipeline hiện tại
 
 ~~~mermaid
@@ -74,8 +146,10 @@ flowchart LR
     ORG --> FILTER["Snapshot mới + resource filters"]
     FILTER --> CAND["Candidates + selected GPUs"]
     CAND --> SCORE["Configured strategy"]
-    SCORE --> COMMIT["CommitAssignment: recheck + reserve"]
-    COMMIT --> CMD["Agent poll START command"]
+    SCORE --> BOOK["ReplanReservations: PLANNED"]
+    BOOK --> WAIT["Đợi StartAt; revalidate"]
+    WAIT --> COMMIT["CommitAssignment: GPU reserve + START"]
+    COMMIT --> CMD["Agent poll trong interval"]
 ~~~
 
 Preview và submit cùng dùng `prepareJob/matchJob` nhưng là hai request độc lập. Submit không reserve ngay: `CreateJob` lưu QUEUED; `ScheduleOnce` mới xếp queue, chọn placement và commit. Không có Job state SCHEDULING/RESERVED/DISPATCHING. Candidate rỗng hoặc conflict không persist START command mới.
@@ -112,7 +186,7 @@ Preview và submit cùng dùng `prepareJob/matchJob` nhưng là hai request đ�
 | Accounting | A11 — normalized GPU states / consumers | ACTIVE | Legacy/unknown/managed/reservation precedence | [normalizeGPUState][accounting] |
 | Filtering | A12 — health/state/assigned/model/VRAM | ACTIVE | Chọn từng GPU an toàn và tương thích | [Matches][allocation-model], [GPU][model] |
 | Filtering | A13 — selector/count/candidate construction | ACTIVE | Đủ GPU cùng server; GPU order cố định | [filter/matchingGPUs][scheduler] |
-| Diagnostics | A14 — insufficient-resource reason | ACTIVE | Lý do chờ từ flags qua constraints | [filter][scheduler], [friendlyPlacementReason][allocation-app] |
+| Diagnostics | A14 — insufficient-resource reason | ACTIVE | Lý do chờ từ flags qua constraints | [filter][scheduler], [matchJob][allocation-app] |
 | Placement | A15 — First Fit | ACTIVE | Score 0, cuối cùng tie Server.ID | [NewScheduler][scheduler] |
 | Placement | A16 — Best Fit | ACTIVE | Ít matching GPU còn dư | [NewScheduler][scheduler] |
 | Placement | A17 — Bin Packing | ACTIVE | Count residual + occupied host term | [NewScheduler][scheduler] |
@@ -125,7 +199,8 @@ Preview và submit cùng dùng `prepareJob/matchJob` nhưng là hai request đ�
 | Release | A24 — cancel/failed launch/observed terminal | ACTIVE | Kết thúc logical reservation đúng nhánh hiện có | [lifecycle][lifecycle] |
 | Safety | Mọi interleaving start/stop và runtime bên ngoài | PARTIAL | Atomic CP state không bao phủ mọi runtime race | [lifecycle][lifecycle], [inventory][inventory] |
 | Launch guard | A25 — local occupancy recheck trước start | ACTIVE | Chặn actual consumer mới; same-Job retry exception | [GPUsAvailable][inventory], [Execute][executor] |
-| Limits | NeededAt delayed start / TTL auto-release / CPU-RAM pool accounting | NOT_IMPLEMENTED | Có input/limits, chưa scheduler enforcement | [validation][validation], [ScheduleOnce][cp] |
+| Planning | NeededAt delayed start / duration STOP | ACTIVE | Calendar PLANNED; execution gate và STOP tại EndAt | domain/reservation.go; application/planning.go |
+| Limits | CPU-RAM pool accounting | NOT_IMPLEMENTED | Docker limits có, chưa accounting tổng capacity | [scheduler][scheduler] |
 | Out of scope | MIG/sharing/preemption/reclaim/checkpoint | NOT_IMPLEMENTED | Chỉ whole physical GPU; không thuật toán tương ứng | [validation][validation], [scheduler][scheduler] |
 
 ## Policy/Priority và Scheduler/Placement
@@ -482,49 +557,10 @@ Before O(1) theo quy ước key; Order có Q lần Evaluate và copy O(Q). Compl
 
 [internal/policy/engine.go][policy] — `necessityRank`, `Before`, `Engine.Order`; [application/controlplane.go][cp] — `Queue`.
 
-## A08 — Queue storage, scheduling attempt và retry
+## A08 — Queue, replanning và retry
 
-### Mục tiêu
+ACTIVE. Queue public chỉ trả QUEUED theo policy.Order. ScheduleOnce lấy snapshot nhất quán qua ReplanReservations; planner xét cả QUEUED và PLANNED chưa đến StartAt. Không vừa thì vẫn QUEUED, thử Job kế tiếp. Lịch tương lai priority thấp có thể mất reservation khi request cao hơn tới; lịch đã bắt đầu không bị thay. Ticker và API run-once dùng cùng flow. CreatedAt/ID vẫn là tie-break; waiting không bảo đảm hết starvation. Xem phần T cho input/output/pseudocode/source và ví dụ.
 
-Xét queued Jobs theo business order, giữ Job không vừa để lần sau thử.
-
-### Khi nào được gọi
-
-Submit gọi repository.CreateJob; GET `/api/v1/queue` gọi Queue nhưng không placement. `runScheduler` ticker default 2s hoặc POST `/api/v1/scheduler/run-once` gọi ScheduleOnce.
-
-### Đầu vào
-
-Stored Jobs; policy.Evaluator; repository server snapshot; clock; configured scheduler.
-
-### Đầu ra
-
-Assigned count hoặc lỗi; Job vẫn QUEUED khi thiếu tài nguyên/conflict và chưa bị caller khác thay đổi.
-
-### Hard constraints
-
-Storage chỉ lấy `Status==QUEUED`. SetJobStatus không kéo Job đã rời queue quay lại QUEUED; terminal Jobs không tự retry. Không có QUEUED→PENDING transition.
-
-### Công thức / comparator
-
-`ListQueuedJobs` duyệt toàn Job map, copy queued Jobs, sort CreatedAt ↑ rồi ID ↑. `Queue` sau đó gọi policy.Order, nên storage FIFO không phải business order cuối.
-
-ScheduleOnce evaluate queue **một lần đầu cycle**, đọc servers rồi lần lượt Plan. Insufficient: giữ QUEUED + reason, tiếp tục Job kế. Conflict: refresh servers, tiếp tục Job kế; không retry cùng Job ngay trong vòng hiện tại. Commit thành công cũng refresh servers. Lỗi Plan khác/commit khác conflict kết thúc cycle và trả số đã assign.
-
-### Pseudocode
-
-`ordered = Queue(); servers = ListServers(); for job: Plan → insufficient: reason/continue; placement: Commit → conflict: refresh/continue; success: count++, refresh`.
-
-### Ví dụ
-
-J1 cần 4 GPU, host còn 2; J2 cần 1: J1 giữ queue, J2 vẫn có thể assign trong cycle đó. Job mới đến sau khi Queue được lấy đợi lần gọi ScheduleOnce sau.
-
-### Complexity
-
-Storage: O(J + Q log Q + B_Q), B_Q là dữ liệu cloned của queued Jobs. Policy sort như A07; cycle cộng chi phí Plan/Commit/refresh mỗi attempt, không quy toàn cycle thành O(Q log Q).
-
-### Source mapping
-
-[internal/store/memory/store.go][store] — `CreateJob`, `ListQueuedJobs`, `SetJobStatus`; [ControlPlane][cp] — `Queue`, `ScheduleOnce`; [main][main] — `runScheduler`; [config][config] — `SchedulerInterval`; [httpapi][http] — `runScheduler`.
 
 ## A09 — Server readiness, freshness và drain
 
@@ -799,59 +835,10 @@ O(SL + Σ(G_i(1+R) + M_i log M_i)) cho filtering/sort theo quy ước; diagnosti
 
 [internal/application/scheduler.go][scheduler] — `filter`, `labelsMatch`, `matchingGPUs`, `candidate`; [domain/allocation.go][allocation-model] — `Matches`.
 
-## A14 — Insufficient-resource reason và friendly mapping
+## A14 — Reason khi không đủ tài nguyên
 
-### Mục tiêu
+ACTIVE. Scheduler.filter vẫn sinh diagnostic ErrInsufficientGPU từ resource flags. Planning chuyển lỗi thiếu tài nguyên thành reason business chung “Không đủ GPU an toàn trong khoảng thời gian yêu cầu”, bao gồm conflict thời gian, capability và server chưa sẵn sàng. Preview trả cùng reason. Không suy diễn rằng mọi conflict chỉ do calendar. Source: application/planning.go, allocation.go; diagnostic strategy vẫn ở scheduler.go.
 
-Giải thích vì sao Job chưa có placement, không thay đổi eligibility.
-
-### Khi nào được gọi
-
-`filter` tổng hợp flags; Plan wrap ErrInsufficientGPU; ScheduleOnce ghi reason; matchJob dùng friendlyPlacementReason.
-
-### Đầu vào
-
-`online/labels/model/healthy/available/vram/external/unknown` được OR qua các server/GPU đã đi đến bước đó.
-
-### Đầu ra
-
-Lý do string; no-candidate dẫn QUEUED, không Job FAILED.
-
-### Hard constraints
-
-Flags là tổng hợp pool, không phải proof đủ GPU trên một host. Có reasons ưu tiên nhau khi nhiều nguyên nhân cùng tồn tại.
-
-### Công thức / comparator
-
-`switch` theo thứ tự:
-
-1. !online → `no online agent with fresh inventory (offline, drained or inventory unavailable)`.
-2. !labels → `no server matches the requested labels`.
-3. !model → `GPU model unavailable for performance profile / FP8 requirement`.
-4. !healthy → `no healthy matching GPU`.
-5. !available && external → `GPU occupied by external workload`.
-6. !available && unknown → `GPU ownership unknown; unsafe to schedule`.
-7. !available → `matching GPUs already reserved or allocated`.
-8. !vram → `insufficient available VRAM per GPU`.
-9. Còn lại → `insufficient GPU count on one server`; thêm external suffix nếu external, nếu không mới thêm unknown suffix.
-
-`friendlyPlacementReason` dò substring lần lượt no-online, model-unavailable, no-healthy, external-workload, ownership-unknown, reserved-or-allocated, VRAM; fallback “Chưa đủ số GPU phù hợp trên cùng một server.” Không có reason code riêng cho từng constraint.
-
-### Pseudocode
-
-`chọn nhánh đầu tiên đúng từ flags; Plan trả ErrInsufficientGPU + reason; preview đổi string sang lời giải thích tiếng Việt`.
-
-### Ví dụ
-
-Không GPU available, đồng thời có External và Unknown → external reason thắng. Có GPU đủ VRAM nhưng không đủ count trên một host → count reason, không VRAM reason.
-
-### Complexity
-
-O(1) để chọn nhánh sau khi có flags; friendly mapping scan số pattern cố định, tuyến tính theo độ dài message.
-
-### Source mapping
-
-[internal/application/scheduler.go][scheduler] — `filter`, `Plan`; [allocation.go][allocation-app] — `friendlyPlacementReason`, `matchJob`; [controlplane.go][cp] — `ScheduleOnce`.
 
 ## A15 — First Fit
 
@@ -1088,95 +1075,19 @@ Plan: filtering A13 + Σ scorer cost + O(C log C + K) selection/output. First/be
 
 [internal/application/scheduler.go][scheduler] — `NewScheduler`, `WithPolicy`, `Plan`, `selectCandidate`, `SchedulingPolicy`; [config][config] — `Load`; [main][main]; [ControlPlane.New][cp]; [httpapi/job_view.go][job-view].
 
-## A20 — Preview matching và submit re-evaluation
+## A20 — Preview và submit theo thời gian
 
-### Mục tiêu
+ACTIVE. prepareJob validate RFC3339 (giữ fractional seconds), tolerance quá khứ 60 giây, duration >0 trong max config và interval chưa hết. matchJob thêm hypothetical Job vào snapshot rồi gọi cùng planReservations; không ghi Job/Assignment/Command/GPU. Response có requestedStartAt/requestedEndAt, planningStatus AVAILABLE/CONFLICT; matchedGpuCount là số GPU trong phương án hypothetical thành công (0 khi không đủ), recommendedGpuModels là model trong phương án đó. Preview không bảo đảm submit thành công vì inventory/queue có thể đổi. Submit evaluate latest rồi lưu QUEUED; ticker tạo reservation. Không có preview token, K/auxiliary/scorer trong response preview. Nguồn: application/allocation.go và planning.go; tests TestTimeAwarePreviewIsReadOnlyAndPolicyAware.
 
-Đưa assessment theo snapshot mà không hứa giữ tài nguyên cho user.
 
-### Khi nào được gọi
+## A21 — Hai transaction: calendar reservation và activation
 
-`PreviewJob` hoặc `CreateJob` gọi prepareJob rồi matchJob độc lập.
+ACTIVE. ReplanReservations giữ mutex memory, chạy pure planning callback trên snapshot và revalidate toàn batch trước mutation. Không commit một phần khi một plan conflict; không tạo START. Chỉ sửa QUEUED hoặc PLANNED có StartAt > now và chưa có CommandID.
 
-### Đầu vào
+Tại start <= now < end, CommitAssignment kiểm tra Assignment PLANNED đúng server/UUID, Job ASSIGNED, org đúng, fresh inventory/heartbeat, không drain, GPU Healthy + FREE + chưa AssignedJobID, count/VRAM/profile/FP8/labels. Thành công atomically ghi Assignment RESERVED, Job STARTING, GPU RESERVED và START command. Nếu fail giữ lịch, ghi reason chờ, thử lại trong interval; không double allocation.
 
-`CreateJobRequest`, catalog/policy, clock, repository.ListServers, scheduler.
+Legacy internal CommitAssignment cho Job không có time fields vẫn tồn tại để tương thích code cũ; runtime ScheduleOnce không dùng đường này cho Job mới. Các Job cũ thiếu interval không tự có lịch mới. Nguồn: memory/planning.go, memory/store.go; ports.Repository; application/planning.go. Atomicity chỉ trong một runtime process; durable bọc snapshot transaction.
 
-### Đầu ra
-
-Preview: JobPreview; submit: Job QUEUED được persist. Preview không có ID/job/command/Assignment mới.
-
-### Hard constraints
-
-Không nhận client evaluation result. Submit hợp lệ vẫn được nhận khi resourceMatch không satisfiable. InsufficientGPU là reason chờ, không admission rejection.
-
-### Công thức / comparator
-
-`matchedGpuCount = max_s len(matchingGPUs(s))` trên server fresh và qua labels; default0.
-
-`recommendedGpuModels` là union distinct GPU.Model từ các matching GPU, sort tên; có thể gồm model của server chưa đủ count cho Job. `satisfiable` chỉ khi Plan trên snapshot đó thành công. Không trả recommended server/GPU UUID/score trong JobPreview.
-
-Submit lấy policy/resource state mới nhưng không reserve; cycle sau Order/Plan lại. Job queued pin resolved aliases lúc submit, không re-resolve catalog ở mỗi cycle.
-
-### Pseudocode
-
-`prepare a new in-memory Job → read servers → matching summary + Plan; preview: return assessment; submit: allocate ID, persist QUEUED`.
-
-### Ví dụ
-
-Preview thấy2 matching GPU cho request2 → satisfiable. Một Job khác reserve1 trước submit: submit trả QUEUED với reason chờ; cycle không lấy GPU đã RESERVED. Preview không có lock/ticket giữ chỗ.
-
-### Complexity
-
-matchJob chạy matching summary rồi Plan nên quét/filter lại; cùng bậc filtering/scoring A19, thêm sort distinct model names. Persistence/ID generation của submit tính riêng.
-
-### Source mapping
-
-[internal/application/allocation.go][allocation-app] — `prepareJob`, `PreviewJob`, `matchJob`, `ResourceMatch`; [application/controlplane.go][cp] — `CreateJob`.
-
-## A21 — Atomic reservation và double-allocation prevention tại CP
-
-### Mục tiêu
-
-Không để hai commits hợp lệ giữ cùng UUID; resources, Job và START command được chấp nhận cùng nhau.
-
-### Khi nào được gọi
-
-`ScheduleOnce` đã có Placement và tạo START_CONTAINER PENDING; gọi ports.Repository.CommitAssignment.
-
-### Đầu vào
-
-`jobID`, `Placement`, `Command`, `at`; stored Job/server/GPU/commands mới nhất trong lock.
-
-### Đầu ra
-
-Job ASSIGNED + Assignment RESERVED + GPU RESERVED/AssignedJobID + START command trong store; hoặc ErrNotFound/ErrConflict, chưa mutate.
-
-### Hard constraints
-
-`memory.Store.mu.Lock` bao trùm check/mutation. Kiểm: Job tồn tại và QUEUED; server tồn tại và Schedulable; GPUCount>0; len(selected UUIDs)==GPUCount; command.AgentID==server.ID; command.ID chưa có; UUID không rỗng/không duplicate; tất cả UUID tồn tại và từng GPU còn Matches; legacy selectors vẫn match.
-
-Checks hoàn tất trước đổi slice/map. Commit không validate lại client request, không evaluate policy/Order hoặc re-resolve catalog. Nó tin application đã tạo command type/status/payload đúng; không tự kiểm payload.JobID tương ứng jobID.
-
-### Công thức / comparator
-
-Phép toán là check-and-update trong cùng critical section, không tính score mới. Job.Policy nhận Placement.Policy do application gắn từ evaluation đầu cycle. Không có Reservation entity/table riêng.
-
-### Pseudocode
-
-`lock → read current Job/server → validate toàn bộ selected UUIDs/constraints/command identity → set GPU RESERVED + Job ASSIGNED + Assignment + command → unlock`.
-
-### Ví dụ
-
-Hai calls chọn cùng FREE GPU: call đầu reserve dưới lock; call sau thấy GPU không Matches hoặc Job không QUEUED → Conflict. UUID cuối bị thiếu làm toàn attempt fail, không reserve trước những UUID đầu.
-
-### Complexity
-
-Validation O(G_i + K·R + L), thêm clone server/job/command data B_local; không phải O(K) vì scan toàn GPU host. Durable wrapper thêm A22.
-
-### Source mapping
-
-[internal/ports/repository.go][ports] — `Repository.CommitAssignment`; [internal/store/memory/store.go][store] — `CommitAssignment`; [ControlPlane.ScheduleOnce][cp].
 
 ## A22 — Durable reservation transaction / rollback
 
@@ -1220,110 +1131,23 @@ O(B_state) về lượng dữ liệu copy/encode mỗi mutation, cộng fn và f
 
 [internal/store/durable/store.go][durable] — `Open`, `transact`, `saveSnapshot`, `read`; [durable/repository.go][durable-repo] — `CommitAssignment` wrapper; [memory/snapshot.go][snapshot] — `Export/Restore`; [main][main].
 
-## A23 — Dispatch: lease, redelivery và ACK gate
+## A23 — Command lease, time gate và ACK
 
-### Mục tiêu
+ACTIVE. LeaseCommands chỉ trả đúng AgentID; START kiểm lại freshness, organization, reservation thuộc Job, GPU vẫn RESERVED/ALLOCATED của chính Job và now nằm trong interval. Lease hết hạn có thể redeliver cùng ID trong interval; không redeliver START đã hết interval.
 
-Giao START đã commit qua Agent poll; có retry delivery và tránh áp ACK lặp tại CP.
+STOP thường đợi START PENDING/DELIVERED hoàn tất. Riêng START DELIVERED đã hết interval: cho STOP đi qua để Agent executor tuần tự dừng cả trường hợp START ACK bị mất. Không phát lại START muộn. Nếu chưa được Agent xác nhận hoặc mất kết nối, giữ claim; không tự FREE.
 
-### Khi nào được gọi
+ACK START lỗi theo lifecycle cũ → FAILED/release, actual active consumer vẫn được accounting giữ. ACK thành công chưa thay inventory. Nguồn: memory/store.go, memory/planning.go, memory/lifecycle.go; Agent executor/Runner không thay đổi.
 
-`GET /api/v1/agents/{agentID}/commands` → PollCommands → LeaseCommands; ACK POST → AckCommand.
 
-### Đầu vào
+## A24 — Hết duration, cancel và release
 
-agentID, now, configured CommandLease, limit; Command maps, linked Job.Assignment.CommandID; ACK.
+ACTIVE. processReservations kiểm EndAt tại mỗi scheduling/reconcile tick. QUEUED hết interval → FAILED. PLANNED chưa dispatch hoặc START còn PENDING → CANCELLED, RELEASED; command chưa giao bị vô hiệu. Workload đã giao/chạy → STOPPING và STOP_CONTAINER graceful 30 giây, không release ngay.
 
-### Đầu ra
+Inventory running → ALLOCATED/RUNNING; exited/dead → STOPPED nếu đã yêu cầu stop, hoặc SUCCEEDED/FAILED theo exit code. Absence chỉ đủ để release khi START đã ACK thành công và snapshot không cũ hơn ACK, hoặc STOP đã ACK thành công và snapshot không cũ hơn ACK STOP. Điều này bảo vệ STARTING trong lúc pull/create và STOP với lost START ACK.
 
-Command PENDING→DELIVERED, Attempts tăng, DeliveredAt/LeaseUntil cập nhật; first ACK đưa command SUCCEEDED/FAILED.
+Release recompute physical state từ consumers/health; chỉ FREE khi không còn blocker. Future PLANNED không giữ physical GPU và không được dùng để adopt một container. Offline/lease timeout không tự release. Test: TestReservationEndStopsManagedAndReleasesOnlyOnObservation, TestExpiredDeliveredStartWithLostACKCanStillStop. Nguồn: memory/lifecycle.go, accounting.go, application/planning.go.
 
-### Hard constraints
-
-Agent/server ID phải tồn tại. STOP chỉ lease khi START không PENDING/DELIVERED. Lease không gọi Server.Schedulable; chặn placement mới và dispatch một command đã reserve là hai check khác nhau.
-
-### Công thức / comparator
-
-Eligible khi `PENDING` hoặc `DELIVERED AND LeaseUntil != nil AND LeaseUntil < now`; dấu < là strict. Sort eligible theo CreatedAt ↑ rồi ID ↑, truncate limit. application cap limit>100 về100; repository default10 nếu ≤0. Lease default15s, mỗi lần giao đặt `LeaseUntil=now+lease`. Không có retry budget/exponential backoff tại repository.
-
-ACK đúng AgentID, command chưa terminal: lưu result rồi applyAckLocked. ACK terminal lặp trả record cũ, không apply lại. Không có guard bắt buộc command đã DELIVERED trước khi nhận ACK.
-
-### Pseudocode
-
-`lọc Agent/type/start-dependency/status/lease; FIFO+ID; lấy limit; lease; ACK: nếu terminal return, nếu không finish command và apply job transition`.
-
-### Ví dụ
-
-START DELIVERED leaseUntil=12:00:15: poll đúng12:00:15 chưa redeliver, poll sau mốc đó có thể giao lại. STOP PENDING vẫn bị giữ khi START còn DELIVERED dù lease START đã hết.
-
-### Complexity
-
-O(D + E log E + B_E) cho quét/sort/copy E eligible commands, cộng payload decode của STOP; durable wrapper A22. ACK còn chịu lifecycle/accounting A24.
-
-### Source mapping
-
-[internal/store/memory/store.go][store] — `LeaseCommands`, `AckCommand`; [application/controlplane.go][cp] — `PollCommands`, `AckCommand`; [config][config] — `CommandLease`; [httpapi/server.go][http].
-
-## A24 — Cancel, observed allocation và reservation release
-
-### Mục tiêu
-
-Kết thúc logical reservation theo control/observed lifecycle; vẫn bảo vệ active consumers.
-
-### Khi nào được gọi
-
-`RequestStop`, first `applyAckLocked`, `reconcileObservedLocked` trong ReplaceInventory; generic SetJobStatus khi terminal.
-
-### Đầu vào
-
-Job/Assignment, START/STOP commands và ACK, assigned-server InventoryReport, timestamps.
-
-### Đầu ra
-
-Job/Assignment/ContainerID/Events cập nhật; release sets ReservationState RELEASED + ReleasedAt rồi normalize GPU.
-
-### Hard constraints
-
-Terminal Jobs không được hồi sinh bởi transition/ACK/reconcile. RequestStop nhận Job terminal hoặc STOPPING trả record hiện tại, không thêm command. Reconcile chỉ Job nonterminal đã assign vào server report; nhận MANAGED container cùng JobID, ưu tiên active nếu nhiều records.
-
-### Công thức / comparator
-
-| Trigger / guard | Job result | Reservation result |
-|---|---|---|
-| Stop Job QUEUED | CANCELLED | Chưa có Assignment |
-| Stop assigned Job, START còn PENDING | CANCELLED; START FAILED với lý do cancel | RELEASED |
-| Stop Job có Assignment, START không PENDING | STOPPING + STOP command | Giữ reservation |
-| START success ACK khi ASSIGNED | STARTING; lưu ContainerID | Chưa tự ALLOCATED |
-| START failed ACK khi ASSIGNED/STARTING/STOPPING | FAILED | RELEASED |
-| START failed ACK khi RUNNING | Không đổi Job bởi nhánh failure này | Giữ |
-| STOP success ACK | Command thành công, Job giữ | Không tự release |
-| STOP failed ACK khi STOPPING | RUNNING | Giữ |
-| Inventory active running/paused/restarting | ASSIGNED/STARTING→RUNNING; STOPPING giữ | ALLOCATED |
-| Inventory exited/dead khi STOPPING | STOPPED, không phụ thuộc exit code | RELEASED |
-| Inventory exited/dead, Job khác STOPPING | SUCCEEDED nếu exitCode=0, còn lại FAILED | RELEASED |
-| Missing khi RUNNING | FAILED | RELEASED |
-| Missing khi STOPPING | STOPPED | RELEASED; chưa guard START đang DELIVERED |
-| Missing khi STARTING và ObservedAt ≥ Job.UpdatedAt | FAILED | RELEASED |
-| Missing khi ASSIGNED hoặc STARTING report quá cũ | Giữ | Giữ |
-| Offline, lease expiry, TTL hết, CP disconnect | Không tự terminal/requeue | Không tự release |
-
-Reservation có `RESERVED→ALLOCATED→RELEASED` và `RESERVED→RELEASED`. Job có thể chạy/exit trước START ACK, không buộc đi qua STARTING. Release dùng current stored containers và nil processes khi normalize; GPU đầu vào OCCUPIED_UNKNOWN còn được bảo vệ bởi unknown-state branch. Inventory mới tiếp tục tính từ actual report.
-
-### Pseudocode
-
-`match actual container by JobID/server; apply active/exit/missing guards; nếu terminal: mark Assignment RELEASED, keep history, normalize occupancy; không ép FREE`.
-
-### Ví dụ
-
-Stop ACK success nhưng inventory vẫn running: Job STOPPING, GPU tiếp tục ALLOCATED. Inventory sau thấy exited: STOPPED + Assignment RELEASED; GPU chỉ FREE nếu không consumer/unknown/unhealthy/reservation khác.
-
-### Complexity
-
-Not explicitly characterized from current implementation: reconciliation duyệt containers + toàn Jobs; mỗi terminal release có thể gọi lại accounting và clone state. Không suy ra cận tuyến tính chỉ theo số Job/container khi mỗi release còn normalize toàn host.
-
-### Source mapping
-
-[internal/store/memory/lifecycle.go][lifecycle] — `RequestStop`, `transitionLocked`, `applyAckLocked`, `reconcileObservedLocked`, `releaseLocked`; [store.go][store] — `SetJobStatus/ReplaceInventory`; [domain.JobStatus.Terminal][model].
 
 ## A25 — Local GPU availability guard trước Agent launch
 
@@ -1394,9 +1218,9 @@ Hai servers ONLINE, không drain, heartbeat/inventory receipt cách now1s. Tất
 
 **Strategy:** best-fit score A=2−2=0, B=4−2=2. Chọn srv-a; Server.ID không cần dùng để phá hòa ở ví dụ này. Không phải vì A có auxiliary score tốt hơn: server scorer không dùng business score.
 
-**Reservation:** CommitAssignment recheck J1 còn QUEUED, A fresh, UUIDs còn FREE/Healthy/match. Thành công tạo Assignment RESERVED cho2 UUID; J1 ASSIGNED; hai GPU RESERVED + AssignedJobID=J1; START_CONTAINER PENDING cùng commit. Durable save thành công mới trả success. GPU-A0/A3 giữ blocker; không stop/adopt workload khác.
+**Reservation:** ReplanReservations lưu J1 ASSIGNED/PLANNED cho interval requested. Chỉ khi đến StartAt và revalidate thành công mới CommitAssignment chuyển STARTING/RESERVED và tạo START. Durable save thành công mới trả success. GPU-A0/A3 giữ blocker; không stop/adopt workload khác.
 
-**Job sau:** ScheduleOnce refresh servers rồi tiếp tục J2; B còn4 match nên có thể assign2 tại B trong cùng cycle. DevelopmentFacts.UsedGPUs vẫn0 vì không có ledger; example này không chứng minh quota enforcement.
+**Job sau:** planner thêm booking J1 vào calendar trước khi xét J2; B còn4 match nên có thể assign2 tại B trong cùng cycle. DevelopmentFacts.UsedGPUs vẫn0 vì không có ledger; example này không chứng minh quota enforcement.
 
 **Dispatch/release:** Agent poll START của J1, local guard A25 kiểm lại; START success ACK đưa ASSIGNED→STARTING, active inventory đưa RUNNING/Assignment ALLOCATED (có thể active tới trước ACK). Khi inventory thấy exited code0 mà không có stop intent: SUCCEEDED + Assignment RELEASED, rồi normalize actual occupancy. Nếu A thay đổi trước commit: Conflict, không giữ một phần UUID, J1 còn QUEUED để cycle sau thử nếu chưa bị caller khác đổi trạng thái.
 
@@ -1421,7 +1245,7 @@ Paths dưới đây thuộc backend `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-d
 | A11 — resource accounting | [internal/store/memory/accounting.go][accounting]; [store.go][store] | normalizeGPUState, ReplaceInventory | ACTIVE |
 | A12 — GPU filters | [internal/domain/model.go][model]; [allocation.go][allocation-model] | GPU.Schedulable, AvailableMemoryMiB, Matches | ACTIVE |
 | A13 — candidates | [internal/application/scheduler.go][scheduler] | filter, matchingGPUs, labelsMatch | ACTIVE |
-| A14 — no-candidate reasons | [internal/application/scheduler.go][scheduler]; [allocation.go][allocation-app] | filter, friendlyPlacementReason | ACTIVE |
+| A14 — no-candidate reasons | [internal/application/scheduler.go][scheduler]; [allocation.go][allocation-app] | filter, planReservations, matchJob | ACTIVE |
 | A15 — First Fit | [internal/application/scheduler.go][scheduler] | NewScheduler, StrategyFirstFit scorer | ACTIVE |
 | A16 — Best Fit | [internal/application/scheduler.go][scheduler] | NewScheduler, StrategyBestFit scorer | ACTIVE |
 | A17 — Bin Packing | [internal/application/scheduler.go][scheduler] | NewScheduler, freeGPUCount | ACTIVE |
@@ -1434,23 +1258,24 @@ Paths dưới đây thuộc backend `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-d
 | A24 — allocation/release | [internal/store/memory/lifecycle.go][lifecycle] | RequestStop, applyAckLocked, reconcileObservedLocked, releaseLocked | ACTIVE |
 | All-interleaving reservation safety | [internal/store/memory/lifecycle.go][lifecycle] | STOPPING + missing branch | PARTIAL |
 | A25 — Agent launch guard | [internal/agent/inventory.go][inventory]; [executor.go][executor] | GPUsAvailable, CommandExecutor.Execute | ACTIVE |
-| TTL / delayed-start / CPU-RAM admission | [internal/application/validation.go][validation]; [scheduler.go][scheduler] | Fields validated; không có corresponding execution rule | NOT_IMPLEMENTED |
+| Time-window planning / delayed start / duration stop | internal/domain/reservation.go; application/planning.go; memory/planning.go | TimeWindow, planReservations, processReservations, ReplanReservations | ACTIVE |
+| CPU/RAM capacity admission | [scheduler.go][scheduler] | Chưa accounting tổng capacity | NOT_IMPLEMENTED |
 
 ## Design observations
 
 ### 1. Policy facts và request thời gian chưa enforce allocation production
 
-**Observation:** provider đang wired là DevelopmentFacts tĩnh; usage không cập nhật khi commit/release. NeededAt/TTL được nhận nhưng không hẹn start/auto-stop; CPU/RAM không được tổng hợp vào placement admission.
+**Observation:** provider đang wired là DevelopmentFacts tĩnh; usage không cập nhật khi commit/release. NeededAt/TTL đã enforce theo phần T; CPU/RAM vẫn chưa được tổng hợp vào placement admission.
 
-**Impact:** có thể mô tả đầy đủ demo policy/whole-GPU placement, chưa gọi đó là quota ledger, lịch đặt trước hay reservation timeout. Không tự xem admission lane là quota transaction.
+**Impact:** có thể mô tả đầy đủ demo policy/whole-GPU placement, chưa gọi đó là quota ledger; lịch đặt trước hiện là MVP greedy, STOP phụ thuộc kết nối runtime. Không tự xem admission lane là quota transaction.
 
 **Relevant source:** [policy/engine.go][policy], [main.go][main], [allocation.go][allocation-app], [validation.go][validation], [scheduler.go][scheduler].
 
 ### 2. Queue deterministic trên snapshot, không đảm bảo starvation-free/global priority transaction
 
-**Observation:** lane đi trước Necessity; aging có cap và không vượt primary keys. Jobs không vừa bị bỏ qua để thử Jobs sau; Order evaluate một lần đầu cycle, Commit không re-evaluate policy hoặc xác minh queue snapshot còn mới.
+**Observation:** lane đi trước Necessity; aging có cap và không vượt primary keys. Jobs không vừa bị bỏ qua để thử Jobs sau; Order và calendar commit cùng lock snapshot; metadata/policy facts bên ngoài runtime store không nằm trong transaction này.
 
-**Impact:** một Job có thể đợi lâu dù aging đạt cap; Job mới có priority cao đến giữa cycle không bắt buộc được xét trước commit hiện tại. Atomic resource reservation không đồng nghĩa atomic business ordering cho mọi concurrent call.
+**Impact:** một Job có thể đợi lâu dù aging đạt cap; Job mới vào sau snapshot được xét ở cycle kế tiếp và có thể thay lịch còn future; không preempt lịch đã bắt đầu.
 
 **Relevant source:** [Before/Order][policy], [ScheduleOnce][cp], [CommitAssignment][store].
 
@@ -1464,19 +1289,19 @@ Paths dưới đây thuộc backend `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-d
 
 ### 4. Reservation atomic tại CP nhưng release/observation còn runtime race
 
-**Observation:** CP check/mutate dưới mutex và durable rollback có thực. Tuy nhiên STOPPING + missing release không đợi START DELIVERED hoàn tất; STOP failed ACK đặt RUNNING mà không cần fresh active observation. STARTING missing còn so Agent ObservedAt với CP UpdatedAt; local start check không tạo lock với runtime bên ngoài.
+**Observation:** CP check/mutate dưới mutex và durable rollback có thực. Missing nay cần ACK START hoặc ACK STOP và inventory đủ mới; STOP failed ACK đặt RUNNING mà không cần fresh active observation. Missing so Agent ObservedAt với CP command.CompletedAt; local start check không tạo lock với runtime bên ngoài.
 
-**Impact:** có khả năng release trước late start theo phân tích code; clock skew/late ACK không được giải quyết hoàn toàn chỉ bằng inventory sequence. Không khẳng định mọi double runtime allocation đã bị loại bỏ. Active consumers vẫn cần accounting sau logical release.
+**Impact:** regression cho pending START/lost ACK đã có; clock skew/late ACK không được giải quyết hoàn toàn chỉ bằng inventory sequence. Không khẳng định mọi double runtime allocation đã bị loại bỏ. Active consumers vẫn cần accounting sau logical release.
 
 **Relevant source:** [lifecycle.go][lifecycle], [LeaseCommands][store], [GPUsAvailable][inventory], [executor.go][executor].
 
 ### 5. Error propagation và observation trust có giới hạn
 
-**Observation:** ScheduleOnce bỏ qua lỗi SetJobStatus khi ghi no-resource reason và lỗi ListServers khi refresh sau commit/conflict. CP nhận Container.Origin từ report; accounting kiểm Job/server/UUID nhưng Job reconciliation chỉ match JobID/server. Diagnostic reasons dựa trên flags tổng hợp và friendly mapping bằng substring.
+**Observation:** planning batch và execution controller trả lỗi repository lên caller. CP nhận Container.Origin từ report; accounting kiểm Job/server/UUID nhưng Job reconciliation chỉ match JobID/server. Preview/planner dùng reason business chung, diagnostic flags vẫn ở scheduler.
 
-**Impact:** lỗi persistence có thể làm reason chờ không được lưu dù cycle tiếp tục; reason/badge/Job RUNNING riêng lẻ chưa đủ để chứng minh GPU đúng Assignment hoặc toàn bộ snapshot còn sẵn sàng. Source vẫn có hard guards khi commit; không thay code để “đồng bộ” description.
+**Impact:** lỗi persistence làm transaction thất bại; reason/badge/Job RUNNING riêng lẻ chưa đủ để chứng minh GPU đúng Assignment hoặc toàn bộ snapshot còn sẵn sàng. Source vẫn có hard guards khi commit; không thay code để “đồng bộ” description.
 
-**Relevant source:** [ScheduleOnce][cp], [agent_protocol.go][protocol-map], [accounting.go][accounting], [lifecycle.go][lifecycle], [friendlyPlacementReason][allocation-app].
+**Relevant source:** [ScheduleOnce][cp], [agent_protocol.go][protocol-map], [accounting.go][accounting], [lifecycle.go][lifecycle], [matchJob][allocation-app].
 
 [model]: ../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/domain/model.go
 [allocation-model]: ../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/domain/allocation.go

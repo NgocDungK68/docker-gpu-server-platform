@@ -1,5 +1,98 @@
 # Current Task
 
+Time-based Resource Allocation Planning + Workload Execution — tiếp tục implementation dang dở từ checkpoint 40d4a0a (23/09/2026).
+
+CURRENT MILESTONE = WORKING CHECKPOINT: future reservation works and does NOT execute early.
+PLANNING / TIME_RESERVATION / POLICY_CONFLICT / EXECUTION_TRIGGER = WORKING qua focused tests.
+FRONTEND = DONE ở scope form/list/detail, typecheck/contracts/lint PASS.
+LIVE_FAKE_TIME_PLANNING = CHƯA CHẠY. Docker hiện không có container chạy khi kiểm tra; không rebuild/start lại toàn demo trong phiên này.
+
+## DONE
+
+- Recover chỉ status/log/status file và modified/untracked files; giữ phần implementation phiên trước.
+- Reuse neededAt + ttlSeconds (requested duration giây), interval [start,end), một helper overlap; giữ fractional seconds. Start tolerance quá khứ 60 giây; interval phải chưa kết thúc; max duration theo config cũ.
+- Assignment.StartAt/EndAt và PLANNED; giữ future calendar riêng với GPU.State. Không duplicate Assignment/Reservation entity.
+- Greedy Policy ordering + organization hard constraint + resource/capability/time filter + bốn strategy cũ.
+- ReplanReservations atomic batch dưới runtime lock; durable rollback nếu disk lỗi, persistence qua restart. Chỉ QUEUED/future PLANNED chưa bắt đầu được đổi lịch; không preempt RUNNING.
+- Execution controller nối ScheduleOnce/Reconcile; revalidate start và poll. Đến giờ mới STARTING + GPU/Assignment RESERVED + START atomically. Preview dùng cùng planner nhưng không mutation.
+- Hết EndAt: cancel chưa dispatch; execution đã giao/chạy gửi graceful STOP. Release trên observed exit hoặc absence đủ mới sau ACK. Lost START ACK có đường STOP sau expiry, không redeliver START muộn.
+- Guard queue expiration kiểm lại status dưới lock: snapshot QUEUED cũ không được FAILED/release Job đã dispatch. Regression TestStaleQueuedExpirationCannotReleaseDispatchedJob PASS.
+- External/unknown/unhealthy không được allocate; expiry không stop External. Agent/NVML/Docker/auth/policy/scorer code không đổi.
+- API/OpenAPI thêm requestedStartAt/requestedEndAt, assignment.startAt/endAt/PLANNED, preview AVAILABLE/CONFLICT; giữ request ttlSeconds và execution spec.
+- Frontend form giữ image/command/env/CPU/RAM, start datetime, duration số với preset; list/detail thể hiện “Đã lên lịch · Chưa chạy”, interval và thời lượng; bỏ score khỏi lịch.
+- scripts/demo.py planning: scenario dùng API thật, A/N2 + C/N3 + B/N1 tranh 3 H100 VTT, future/no early → RUNNING → automatic STOP/release. Không sửa inventory/frontend giả, chỉ cleanup Job của scenario.
+- Folder Postman Planning mới trong collection cũ: 14 requests; user thường chờ ticker qua GET, không gọi admin run-once.
+- Cập nhật đúng sáu canonical docs trong scope, tiếng Việt. Giữ docs/status lịch sử phía dưới; không thêm MD hoặc sửa README.
+
+## PARTIAL
+
+- Scenario Python/Postman mới đã kiểm syntax/contract nhưng CHƯA chạy trên stack Docker thật; chưa có browser E2E cho time planning.
+- Không có Linux GPU thật: chưa chứng nhận runtime timing/STOP thực tế trên GPU host.
+- EndAt kích hoạt graceful STOP, không bảo đảm deadline realtime khi pull lâu, CP/Agent offline hoặc STOP đang chạy. Giữ claim đến actual confirmation, không coi GPU FREE chỉ do hết giờ.
+- Job/Assignment cũ có zero interval giữ legacy execution; không tự diễn giải TTL thành deadline mới. Tạo Job mới để test planning.
+- Metadata/policy facts ngoài runtime transaction; quota DEVELOPMENT_CONFIG vẫn tĩnh. Single-writer memory/durable MVP, không HA/interval tree/preemption.
+- Không chạy full benchmark, toàn bộ integration, Linux race hoặc production frontend build.
+
+## TODO
+
+- Chạy fake time-planning scenario theo TESTING_RUNBOOK; ghi PASS/FAIL thực tế vào .cache/multi-server-demo/last-planning-check.json và status.
+- Sau đó kiểm trên Linux GPU thật khi có host. Không audit/refactor hoặc chạy lại mọi phase cũ.
+
+## FILES CHANGED
+
+Backend: AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/
+- api/openapi.yaml.
+- internal/domain/model.go, reservation.go, reservation_test.go.
+- internal/ports/repository.go.
+- internal/application/controlplane.go, allocation.go, allocation_test.go, planning.go, planning_test.go.
+- internal/store/memory/store.go, accounting.go, lifecycle.go, planning.go.
+- internal/store/durable/repository.go, planning_test.go.
+- internal/httpapi/job_view.go, allocation_test.go.
+
+Frontend: AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/
+- src/lib/api/types.ts; src/lib/jobs/form-schema.ts.
+- src/components/workloads/job-form.tsx, allocation-preview.tsx, job-lifecycle.tsx.
+- src/app/(console)/workloads/page.tsx và [jobId]/page.tsx.
+- tests/contracts.test.mjs.
+
+Workspace:
+- scripts/demo.py; postman/AIWM.postman_collection.json.
+- docs/SYSTEM_DESIGN.md, ALGORITHMS.md, DOMAIN_MODEL.md, API_TESTING_POSTMAN.md, TESTING_RUNBOOK.md, IMPLEMENTATION_STATUS.md.
+- Binary local ignored: .cache/aiwm-planning-server.exe; không chạy process này.
+
+## TESTS / COMMANDS VERIFIED
+
+PASS tại backend:
+- go test ./internal/domain ./internal/application ./internal/httpapi ./internal/store/memory ./internal/store/durable ./internal/policy
+- Hai regression bổ sung cuối: go test ./internal/application -run 'TestExpiredBlockedReservation|TestRequestedTimeValidation' -count=1
+- Sau guard race cuối: go test ./internal/application ./internal/store/memory ./internal/store/durable ./internal/httpapi — PASS; rebuild Control Plane — PASS.
+- go vet ./internal/domain ./internal/application ./internal/httpapi ./internal/store/memory ./internal/store/durable
+- go build -o ../../.cache/aiwm-planning-server.exe ./cmd/aiwm-server
+- gofmt chỉ các file Go modified/untracked của task.
+
+PASS tại frontend:
+- npm.cmd run typecheck
+- node --experimental-strip-types --test tests/contracts.test.mjs — 11 tests.
+- ESLint targeted bảy source files frontend thay đổi.
+
+PASS static: OpenAPI YAML parse/time fields; Python AST demo.py; JSON collection/14 request planning; git diff --check.
+Không reset/revert/xóa resource. Không chạy Docker prune, migrations hoặc network research.
+
+## NEXT_STEP
+
+Từ workspace root, khởi động lab với code mới rồi chạy đúng scenario mới:
+
+~~~powershell
+python scripts/demo.py up
+python scripts/demo.py planning
+~~~
+
+Không dùng --skip-build vì Control Plane đã đổi. Scenario đòi vtt-gpu-01 fresh có 3 H100 FREE; không tự stop Job khác để đạt điều kiện. Xem docs/TESTING_RUNBOOK.md mục “Kiểm thử Resource Allocation Planning theo thời gian”. Sau PASS ghi kết quả thực tế vào status; không sửa lại policy/scorer/Agent.
+
+---
+
+# Lịch sử checkpoint release (18/09/2026)
+
 REAL AGENT RELEASE / DISTRIBUTION — tiếp tục checkpoint đã commit/push, không sửa lại Fake Demo, policy, scheduler hoặc frontend (18/09/2026).
 
 ## Last Working Checkpoint

@@ -202,6 +202,8 @@ type ResourceRequest struct {
 }
 
 type Assignment struct {
+	StartAt          time.Time          `json:"startAt"`
+	EndAt            time.Time          `json:"endAt"`
 	ServerID         string             `json:"serverId"`
 	GPUUUIDs         []string           `json:"gpuUuids"`
 	CommandID        string             `json:"commandId"`
@@ -237,20 +239,20 @@ type Placement struct {
 }
 
 type ClusterSummary struct {
-	ServersOffline int `json:"serversOffline"`
-	GPUsReserved int `json:"gpusReserved"`
-	GPUsAllocated int `json:"gpusAllocated"`
-	GPUsUnhealthy int `json:"gpusUnhealthy"`
-	ServersTotal  int        `json:"serversTotal"`
-	ServersOnline int        `json:"serversOnline"`
-	GPUsTotal     int        `json:"gpusTotal"`
-	GPUsFree      int        `json:"gpusFree"`
-	GPUsLegacy    int        `json:"gpusOccupiedLegacy"`
-	GPUsUnknown   int        `json:"gpusOccupiedUnknown"`
-	JobsQueued    int        `json:"jobsQueued"`
-	JobsRunning   int        `json:"jobsRunning"`
-	GPUsOccupied  int        `json:"gpusOccupied"`
-	RecentEvents  []JobEvent `json:"recentEvents"`
+	ServersOffline int        `json:"serversOffline"`
+	GPUsReserved   int        `json:"gpusReserved"`
+	GPUsAllocated  int        `json:"gpusAllocated"`
+	GPUsUnhealthy  int        `json:"gpusUnhealthy"`
+	ServersTotal   int        `json:"serversTotal"`
+	ServersOnline  int        `json:"serversOnline"`
+	GPUsTotal      int        `json:"gpusTotal"`
+	GPUsFree       int        `json:"gpusFree"`
+	GPUsLegacy     int        `json:"gpusOccupiedLegacy"`
+	GPUsUnknown    int        `json:"gpusOccupiedUnknown"`
+	JobsQueued     int        `json:"jobsQueued"`
+	JobsRunning    int        `json:"jobsRunning"`
+	GPUsOccupied   int        `json:"gpusOccupied"`
+	RecentEvents   []JobEvent `json:"recentEvents"`
 }
 
 // JobEvent records a lifecycle transition without including command/env secrets.

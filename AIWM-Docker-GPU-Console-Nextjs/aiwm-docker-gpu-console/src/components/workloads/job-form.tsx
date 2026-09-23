@@ -110,9 +110,9 @@ export function JobForm() {
           <Field label="Mức độ quan trọng hệ thống" error={errors.systemImportance?.message}><select className="field-select" {...register("systemImportance")}><Options items={catalog.data?.systemImportance} /></select></Field>
           <Field label="Lý do tính cần thiết" error={errors.necessityReason?.message} wide><select className="field-select" {...register("necessityReason")}><Options items={reasons} /></select></Field>
           {values.necessityReason === catalog.data?.customReason.id && <Field label="Giải trình tính cần thiết" error={errors.necessityExplanation?.message} wide><textarea rows={3} className="field-textarea" {...register("necessityExplanation")} /></Field>}
-          <Field label="Thời điểm cần (giờ địa phương)" error={errors.neededAt?.message}><input type="datetime-local" className="field-input" {...register("neededAt")} /></Field>
-          <Field label="Thời gian sử dụng (giờ)" error={errors.ttlHours?.message}><input type="number" min={1 / 60} step="any" max={catalog.data ? catalog.data.limits.maxTtlSeconds / 3600 : undefined} className="field-input" {...register("ttlHours", { valueAsNumber: true })} /></Field>
-          <p className="text-sm text-slate-500 md:col-span-2">Thời điểm cần được chuyển sang UTC khi gửi; có thể khai báo nhu cầu đã quá hạn. Đây chưa phải lịch hẹn chạy. Thời lượng hiện là nhu cầu đăng ký, chưa tự dừng workload khi hết hạn.</p>
+          <Field label="Thời điểm bắt đầu mong muốn (giờ địa phương)" error={errors.neededAt?.message}><input type="datetime-local" className="field-input" {...register("neededAt")} /></Field>
+          <Field label="Thời lượng sử dụng (giờ)" error={errors.ttlHours?.message}><input type="number" list="duration-presets" min={1 / 60} step="any" max={catalog.data ? catalog.data.limits.maxTtlSeconds / 3600 : undefined} className="field-input" {...register("ttlHours", { valueAsNumber: true })} /></Field>
+          <datalist id="duration-presets">{[0.5, 1, 2, 4, 8].map(hours => <option key={hours} value={hours}>{hours === 0.5 ? "30 phút" : hours + " giờ"}</option>)}</datalist><p className="text-sm text-slate-500 md:col-span-2">Hệ thống giữ tài nguyên theo lịch. Workload chỉ bắt đầu từ thời điểm đăng ký và được dừng khi hết thời lượng sử dụng.</p>
         </div>
       </Card>
       <div className="flex flex-wrap items-center justify-between gap-3">

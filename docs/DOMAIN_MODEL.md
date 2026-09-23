@@ -33,6 +33,29 @@ PostgreSQL chứa organizations/users/sessions/server_enrollments/server_ownersh
 
 Kiểm thử boundary mới (đã viết, chưa chạy): backend application/identity_test.go, httpapi/identity_test.go, TestOrganizationFilterPrecedesScoringForEveryStrategy và memory/safety_test.go. Chúng kiểm tra ownership server-side, session scope/spoofing/logout, org filter trước scorer, commit conflict không mutation và reconnect chưa có FULL inventory. PostgreSQL transaction/bind concurrency vẫn cần kiểm chứng trên DB thật.
 
+## Time-window reservation — bổ sung 23/09/2026
+
+Source: internal/domain/reservation.go; application/planning.go; memory/planning.go và lifecycle.go.
+
+| Model/field | Semantics / owner |
+|---|---|
+| AllocationIntent.NeededAt | Requested start RFC3339, UTC, giữ fractional seconds; tolerance quá khứ 60 giây và interval chưa hết. |
+| AllocationIntent.TTLSeconds | Requested duration bằng giây, >0, max từ config; end = start + duration. Không phải lease timeout hay thời gian kể từ RUNNING. |
+| TimeWindow | Giá trị [StartAt,EndAt), không entity/ID riêng. Overlaps dùng strict <; endpoint chạm nhau không conflict. |
+| Assignment.StartAt/EndAt | Calendar source of truth khi đã reserve; CommandID rỗng lúc PLANNED. Persist gob cùng Job. |
+| JobView.requestedStartAt/requestedEndAt | DTO derive từ intent; preview có thêm planningStatus AVAILABLE/CONFLICT. |
+| Assignment.ReservationState | PLANNED → RESERVED → ALLOCATED → RELEASED; cancel trước execution có thể đi thẳng RELEASED. |
+
+QUEUED chưa có reservation. ASSIGNED/PLANNED đã giữ interval nhưng chưa START. STARTING bắt đầu khi execution controller atomically tạo START tại start <= now < end. Replanning chỉ áp dụng PLANNED với StartAt > now và CommandID rỗng; loser quay lại QUEUED. Không đổi JobStatus enum.
+
+Một Job có tối đa một Assignment hiện hành; một GPU có thể nằm trong nhiều Assignment không overlap. GPU.AssignedJobID chỉ biểu diễn current physical claim, không phải future calendar. PLANNED không làm GPU.State RESERVED và không cho phép adopt managed-looking container.
+
+EndAt: QUEUED hết thời gian → FAILED; chưa dispatch → CANCELLED/RELEASED; đã giao/chạy → STOPPING/STOP → inventory confirms → STOPPED/RELEASED. Actual blocker còn thì GPU không FREE. Agent/CP disconnect không stop container hoặc tự release; reconnect xử lý interval còn lại hoặc gửi STOP nếu đã hết.
+
+Compatibility: gob version 1 đọc thêm fields bằng zero-value. Job cũ thiếu interval không tự tạo lịch; execution cũ đã có CommandID giữ nguyên, không diễn giải lại TTL thành deadline âm thầm. Tạo Job mới đầy đủ intent để dùng time planning.
+
+Tests: application/planning_test.go; domain/reservation_test.go; durable/planning_test.go; httpapi/TestFutureJobTimeContract.
+
 ## 1. Domain entities và các representation thực sự tồn tại
 
 ### 1.1 Server
@@ -112,7 +135,7 @@ Không có hai field `DesiredState` / `ActualState` riêng. `Status` kết hợp
 - `policy.FactsProvider` tách Planning/Quota; `DevelopmentFacts` là cấu hình demo tĩnh, không quota ledger.
 - `application.JobPreview/ResourceMatch/AllocationOptions` là read DTO; preview không identity/persistence/command/reservation.
 
-NeededAt là nhu cầu mong muốn, cho phép quá khứ; waiting từ Job.CreatedAt của CP. TTL chỉ lưu/validate thời lượng, chưa stop/reclaim/hẹn lịch. Gob version 1 đọc được Job cũ với zero-value intent, resource constraints/Assignment cũ giữ nguyên; public Create mới yêu cầu đủ intent.
+NeededAt là start cố định; TTLSeconds là duration tính từ start. Waiting priority vẫn từ Job.CreatedAt. Controller dispatch/stop theo interval, không có timeout song song. Gob version 1 đọc được Job cũ với zero-value intent, resource constraints/Assignment cũ giữ nguyên; public Create mới yêu cầu đủ intent.
 
 ### 1.5 Workload, External/Existing Workload và Managed Workload
 
@@ -130,15 +153,16 @@ Phân loại “MANAGED” của Container và việc CP công nhận GPU alloca
 
 | Field của Assignment | Ý nghĩa |
 |---|---|
+| StartAt, EndAt | Reservation interval [start,end), planner lấy từ intent. |
 | `ServerID`, `GPUUUIDs` | Một server và đúng tập UUID được commit cho Job. |
 | `CommandID` | ID của **START_CONTAINER**, không đổi thành Stop command ID. |
 | `AssignedAt` | Thời điểm reserve/assign tại CP. |
-| `ReservationState string`, `ReleasedAt *time.Time` | Literal hiện được ghi: RESERVED, ALLOCATED, RELEASED. Go chưa có typed enum cho field này. |
+| `ReservationState string`, `ReleasedAt *time.Time` | Literal hiện được ghi: PLANNED, RESERVED, ALLOCATED, RELEASED. Go chưa có typed enum cho field này. |
 | `Strategy`, `Score`, `Reason` | Quyết định đã chọn, lưu để giải thích lịch sử placement. |
 
-**Owner:** `CommitAssignment` tạo RESERVED cùng Job ASSIGNED và Start command; `reconcileObservedLocked` đặt ALLOCATED; `releaseLocked` đặt RELEASED và giữ nguyên Assignment để xem lịch sử. Không có reservation TTL/expiry riêng, không tự release vì Agent offline.
+**Owner:** ReplanReservations tạo PLANNED cùng ASSIGNED; CommitAssignment tại StartAt tạo RESERVED cùng STARTING và START command; `reconcileObservedLocked` đặt ALLOCATED; `releaseLocked` đặt RELEASED và giữ nguyên Assignment để xem lịch sử. EndAt điều khiển STOP/cancel; không tự release vì Agent offline.
 
-`domain.Placement` là **giá trị tạm** trả về từ `Scheduler.Plan`: ServerID, GPUUUIDs, Strategy, Score, Reason. Không có ID/status/persistence độc lập; Plan chưa giữ GPU. Chỉ CommitAssignment thành công mới tạo reservation.
+`domain.Placement` là **giá trị tạm** trả về từ `Scheduler.Plan`: ServerID, GPUUUIDs, Strategy, Score, Reason. Không có ID/status/persistence độc lập; Plan chưa giữ GPU. ReplanReservations tạo calendar reservation; CommitAssignment activation lúc đến giờ.
 
 ### 1.7 Agent Command
 
@@ -240,8 +264,8 @@ Không có API operator set trực tiếp GPU.State. `inventoryToDomain` khởi 
 | State | Ý nghĩa | Owner / điểm vào |
 |---|---|---|
 | `QUEUED` | Đang đợi scheduler, có thể kèm lý do thiếu tài nguyên. | `ControlPlane.CreateJob`; `ScheduleOnce → SetJobStatus` cập nhật lý do khi vẫn queued. |
-| `ASSIGNED` | Commit thành công Assignment RESERVED + Start command. Chưa khẳng định command đã được delivery. | `CommitAssignment`. Poll không đổi state Job. |
-| `STARTING` | Start ACK thành công khi Job còn ASSIGNED; đang chờ actual inventory. | `AckCommand → applyAckLocked`. |
+| ASSIGNED | Assignment PLANNED, chưa có START; đợi đến giờ và tài nguyên safe. | ReplanReservations. |
+| STARTING | Đến giờ và revalidation thành công, START đã được enqueue; đợi inventory. | CommitAssignment; legacy ACK path vẫn giữ. |
 | `RUNNING` | Thông thường đã quan sát container running/paused/restarting. Cũng là state phục hồi khi Stop ACK thất bại, chưa cần observation mới. | `reconcileObservedLocked`; `applyAckLocked` nhánh failed stop. |
 | `STOPPING` | Đã yêu cầu dừng, Stop command được enqueue; container có thể còn active hoặc chưa thấy. | `RequestStop` khi Job có Assignment và Start không còn PENDING. |
 | `STOPPED` | Sau stop request, inventory thấy exited/dead hoặc không thấy container. Không phải “stop ACK đã thành công”. | `reconcileObservedLocked` từ STOPPING. Terminal. |
@@ -253,11 +277,12 @@ Không có API operator set trực tiếp GPU.State. `inventoryToDomain` khởi 
 
 ### 3.4 Reservation state
 
-Field `Assignment.ReservationState` là string, ba literal đang được ghi:
+Field `Assignment.ReservationState` là string, bốn literal đang được ghi:
 
 | State | Ý nghĩa | Owner / trigger |
 |---|---|---|
-| `RESERVED` | Assignment được commit, chưa có active container xác nhận. | `CommitAssignment` tạo. |
+| PLANNED | Giữ interval; chưa chiếm physical GPU/chưa có command. | ReplanReservations. |
+| RESERVED | Đến giờ, GPU thực tế được giữ và START được tạo. | CommitAssignment. |
 | `ALLOCATED` | Reconciliation thấy container cùng Job trên Server assigned ở running/paused/restarting. | `reconcileObservedLocked`, kể cả khi Job đang STOPPING. |
 | `RELEASED` | Logical reservation đã kết thúc; Assignment vẫn giữ UUID và decision history. | `releaseLocked` khi Job chuyển terminal có Assignment. |
 
@@ -342,10 +367,10 @@ Sơ đồ gồm các đường lifecycle chính và đường tắt do inventory
 ~~~mermaid
 stateDiagram-v2
     [*] --> QUEUED
-    QUEUED --> ASSIGNED: commit reservation + START command
+    QUEUED --> ASSIGNED: PLANNED interval; chưa có command
     QUEUED --> CANCELLED: stop before placement
-    ASSIGNED --> CANCELLED: START still PENDING
-    ASSIGNED --> STARTING: successful START ACK
+    ASSIGNED --> CANCELLED: cancel hoặc hết interval trước dispatch
+    ASSIGNED --> STARTING: start reached + revalidate + START
     ASSIGNED --> RUNNING: active inventory before ACK
     STARTING --> RUNNING: active inventory
     ASSIGNED --> SUCCEEDED: early exit code 0
@@ -409,13 +434,15 @@ stateDiagram-v2
 
 ~~~mermaid
 stateDiagram-v2
-    [*] --> RESERVED: CommitAssignment
+    [*] --> PLANNED: ReplanReservations
+    PLANNED --> RESERVED: StartAt reached; CommitAssignment
+    PLANNED --> RELEASED: Cancel trước dispatch
     RESERVED --> ALLOCATED: observed active managed container
     RESERVED --> RELEASED: terminal before active observation
     ALLOCATED --> RELEASED: terminal Job
 ~~~
 
-Node đầu biểu diễn Assignment chưa tồn tại, không phải state CREATED. Không có nhánh ALLOCATED → RESERVED của **Assignment** trong flow hiện tại. GPU.State có thể khác ReservationState vì được normalize từ health/consumer evidence. Không có transition do lease timeout, drain hoặc heartbeat timeout.
+Node đầu biểu diễn Assignment chưa tồn tại, không phải state CREATED. Không có nhánh ALLOCATED → RESERVED của **Assignment** trong flow hiện tại. GPU.State có thể khác ReservationState vì được normalize từ health/consumer evidence. EndAt tạo STOP/cancel; lease timeout, drain hoặc heartbeat timeout không tự release.
 
 ### 4.4 Command lifecycle
 
@@ -430,7 +457,7 @@ stateDiagram-v2
     PENDING --> FAILED: failed ACK or cancel before delivery
 ~~~
 
-`LeaseCommands` chỉ lease đúng AgentID; Stop command bị giữ nếu Assignment.CommandID còn PENDING/DELIVERED. Không có timer đổi DELIVERED về PENDING hoặc FAILED, không có max-attempt cutoff phía CP. Leasing cũng không kiểm tra freshness/drain của Server: chặn **placement mới** khác với delivery command đã tồn tại.
+`LeaseCommands` chỉ lease đúng AgentID; Stop command thường đợi START PENDING/DELIVERED, ngoại lệ START DELIVERED đã hết interval. Không có timer đổi DELIVERED về PENDING hoặc FAILED, không có max-attempt cutoff phía CP. START leasing kiểm freshness/drain, ownership, GPU và interval lần nữa. START DELIVERED hết interval không giao lại; STOP đi qua để giải quyết execution/ACK chưa rõ.
 
 `AckCommand` chỉ kiểm tra command thuộc Agent và chưa terminal, chưa bắt buộc đã DELIVERED. ACK đầu tiên kết thúc command và áp dụng hiệu ứng Job cùng transaction; ACK lặp trả command cũ. Runner persist result trước ACK, replay ACK cho ID đã xử lý; đây không phải bảo đảm exactly-once vô hạn qua mọi failure, vì local history có giới hạn.
 
@@ -460,7 +487,7 @@ Ownership hiện dựa trên labels và trusted Agent, không có chứng thực
 ### 5.3 Occupancy và reconciliation
 
 - **External:** active grant chiếm GPU dù utilization=0. Container exited/dead không chiếm qua grant; nếu vẫn còn process/unknown telemetry thì GPU có thể tiếp tục bị chặn.
-- **Managed:** nonterminal Job Assignment bảo vệ UUID trước khi có container. Active observation đúng assignment chuyển GPU ALLOCATED. Job reconciliation dùng Container.JobID/Origin và assigned Server; không đối chiếu exact GPUUUIDs như accounting.
+- **Managed:** nonterminal Assignment đã activate bảo vệ physical UUID trước container; PLANNED chỉ giữ interval. Active observation đúng assignment chuyển GPU ALLOCATED. Job reconciliation dùng Container.JobID/Origin và assigned Server; không đối chiếu exact GPUUUIDs như accounting.
 - **Unknown process:** PID không map được vào active container cùng UUID vẫn chặn GPU. Không có một managed Job được tạo từ PID.
 - **Grant không rõ:** numeric index map sang UUID bằng snapshot NVML hiện tại; unknown index/UUID hoặc unbounded grant trên active container bảo vệ toàn bộ UUID của host. Không giải quyết bằng giả định GPU free.
 - **Job exit/missing:** reconciliation chỉ duyệt Job nonterminal có Assignment đúng Server. External không tham gia Job lifecycle; terminal Job không tự reopen nếu container xuất hiện lại. Accounting vẫn xét active consumer đó để bảo vệ GPU.

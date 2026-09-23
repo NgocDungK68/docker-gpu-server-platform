@@ -3,8 +3,13 @@ package durable
 import (
 	"context"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/domain"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/ports"
 	"time"
 )
+
+func (s *Store) ReplanReservations(ctx context.Context, at time.Time, plan ports.ReservationPlanner) (int, error) {
+	return transact(s, func() (int, error) { return s.core.ReplanReservations(ctx, at, plan) })
+}
 
 // UpsertServer commits the repository mutation before returning.
 func (s *Store) UpsertServer(ctx context.Context, server domain.Server) (domain.Server, error) {

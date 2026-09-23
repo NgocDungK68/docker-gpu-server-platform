@@ -113,11 +113,13 @@ export interface ResourceRequest {
 }
 
 export interface Assignment {
+	startAt: string;
+	endAt: string;
   serverId: string;
   gpuUuids: string[];
   commandId: string;
   assignedAt: string;
-  reservationState: "RESERVED" | "ALLOCATED" | "RELEASED";
+  reservationState: "PLANNED" | "RESERVED" | "ALLOCATED" | "RELEASED";
   releasedAt?: string;
   strategy: SchedulingStrategy;
   score: number;
@@ -125,6 +127,8 @@ export interface Assignment {
 }
 
 export interface Job extends Partial<AllocationIntent> {
+  requestedStartAt: string;
+  requestedEndAt: string;
   organizationId: string;
   policy: PolicyDecision;
   necessityLabel: string;
@@ -195,6 +199,9 @@ export interface PolicyDecision {
   evaluatedAt: string;
 }
 export interface JobPreview {
+  requestedStartAt: string;
+  requestedEndAt: string;
+  planningStatus: "AVAILABLE" | "CONFLICT";
   workloadType: WorkloadType;
   policyStatus: PolicyDecision["status"];
   policyReason: string;
