@@ -58,3 +58,10 @@ test("time planning rejects stale start and keeps half-hour duration", () => {
  assert.equal(jobFormSchema.safeParse({...valid,neededAt:"2020-01-01T08:00"}).success,false);
  assert.equal(allocationInput({...valid,ttlHours:0.5}).ttlSeconds,1800);
 });
+
+test("training proxy only exposes authenticated continuation and artifact download", () => {
+  assert.equal(allowedPublicRoute("POST", ["jobs", "job_123", "continue"]), true);
+  assert.equal(allowedPublicRoute("GET", ["jobs", "job_123", "artifact"]), true);
+  assert.equal(allowedPublicRoute("GET", ["training", "job_123"]), false);
+  assert.equal(allowedPublicRoute("PUT", ["training", "job_123", "artifact"]), false);
+});

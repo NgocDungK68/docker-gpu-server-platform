@@ -80,6 +80,9 @@ const liveApi = {
   createJob: (input: CreateJobInput) =>
     request<Job>(endpoints.jobs, { method: "POST", body: JSON.stringify(input) }),
   stopJob: (id: string) => request<Job>(endpoints.stopJob(id), { method: "POST" }),
+  continueJob: (id: string, input: { neededAt: string; ttlSeconds: number }) =>
+    request<Job>(endpoints.continueJob(id), { method: "POST", body: JSON.stringify(input) }),
+  artifactDownload: (id: string) => request<{ url: string; expiresInSeconds: number }>(endpoints.artifact(id)),
   getQueue: (organizationId?: string) => request<Job[]>(scoped(endpoints.queue, organizationId)),
   runScheduler: () =>
     request<SchedulerResult>(endpoints.runScheduler, { method: "POST" }),

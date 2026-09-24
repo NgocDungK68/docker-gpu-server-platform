@@ -11,6 +11,7 @@ import (
 // implementation is used for the MVP; a PostgreSQL adapter can replace it
 // without changing HTTP handlers, scheduling policy, or agent protocol.
 type Repository interface {
+	UpdateTraining(ctx context.Context, id string, expectedRevision uint64, next domain.TrainingState, at time.Time) (domain.Job, error)
 	// ReplanReservations runs a pure planning callback on a consistent snapshot and
 	// commits all future reservation changes atomically. Callback must not call Repository.
 	ReplanReservations(ctx context.Context, at time.Time, plan ReservationPlanner) (int, error)

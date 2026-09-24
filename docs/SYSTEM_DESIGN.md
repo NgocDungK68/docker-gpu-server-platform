@@ -1,5 +1,45 @@
 # Thiết kế hệ thống AIWM
 
+## Training checkpoint và model output — Phase A
+
+`ports.ObjectStore` tách binary khỏi repository. Adapter S3-compatible dùng minio-go; MinIO chỉ là lựa chọn demo. Organization ID tạo namespace: `s3://<bucket>/<organizationId>/jobs/<jobID>/checkpoints/<outputID>.bin` và `artifacts/<outputID>.bin`. Không thêm Project entity: `Job.Name` vẫn là tên workload.
+
+~~~mermaid
+sequenceDiagram
+    autonumber
+    participant App as Training container
+    participant CP as Control Plane
+    participant Store as S3-compatible ObjectStore
+    participant Repo as Runtime repository
+    participant User as Người vận hành
+    CP->>Repo: RUNNING tới warningAt: REQUESTED
+    App->>CP: Poll contract bằng token từng Job
+    CP-->>App: checkpointRequested
+    App->>CP: PUT archive checkpoint
+    CP->>Repo: SAVING + revision lease
+    CP->>Store: Stream archive vào key mới
+    Store-->>CP: Upload thành công
+    CP->>Repo: AVAILABLE + URI/time/step
+    Note over CP,Repo: EndAt: STOP graceful, TIME_LIMIT; release sau actual stop
+    User->>CP: Xin cấp phát tiếp với thời gian mới
+    CP->>Repo: Job mới, URI nguồn, policy và planning
+    CP-->>App: Khi dispatch: resume reference + contract
+    App->>CP: Lấy URL resume
+    App->>Store: GET checkpoint
+    App->>CP: PUT final model khi train xong
+    CP->>Store: Lưu model
+    CP->>Repo: Artifact READY + URI
+    User->>CP: Download (kiểm organization)
+    CP-->>User: URL có chữ ký, 300 giây
+~~~
+
+Ứng dụng tự serialize state và model; CP không phân tích framework. Cảnh báo `clamp(10% duration,5m,30m)` trước EndAt, tối thiểu StartAt cho allocation ngắn. Polling contract là notification hiện thực; không thêm signal/new Agent command. STOP vẫn dùng 30 giây grace, không đổi reservation/policy/placement. Checkpoint không có nghĩa COMPLETED; artifact chỉ READY sau upload thực và commit metadata. Upload độc lập scheduler lock; unique key + CAS lease tránh publish đè bởi request cũ.
+
+**Persistence hiện tại:** Repo ở diagram vẫn là memory + durable gob, chưa phải PostgreSQL operational state. PostgreSQL đang giữ business metadata. Phase D mới chuyển toàn bộ `ports.Repository`; Prometheus/history thuộc Phase E và chưa có. Không mô tả các component dự kiến này như runtime đã hoạt động.
+
+Các test liên kết ở `httpapi/training_test.go` dùng HTTP + MinIO + Python thật và observation có kiểm soát; full Agent Sim/GPU E2E chưa chạy. UI mới thuộc Phase B. Chi tiết cấu hình/chạy lại nằm ở đầu `TESTING_RUNBOOK.md`.
+
+
 Tài liệu mô tả source hiện tại, cập nhật Organization/auth qua inspection tĩnh ngày 17/09/2026. Đây là thiết kế đã triển khai cùng các giới hạn quan sát được; không phải đề xuất thêm component. Không chạy build/test/runtime trong lần viết tài liệu này.
 
 ## Problem, Goal và Core constraint
@@ -10,7 +50,7 @@ Tài liệu mô tả source hiện tại, cập nhật Organization/auth qua ins
 
 **Core constraint: existing workloads phải tiếp tục chạy.** Agent/Control Plane chỉ observe và account External containers, không tự restart/stop/delete/adopt. GPU có consumer phải được loại khỏi tài nguyên có thể cấp phát, kể cả container đang idle. Mất kết nối quản lý không kích hoạt cleanup container.
 
-Đơn vị cấp phát là nguyên GPU vật lý trên **một server** cho mỗi Job. Kubernetes, MIG, GPU sharing, time-sharing, preemption, reclaim và checkpoint không thuộc execution flow hiện có.
+Đơn vị cấp phát là nguyên GPU vật lý trên **một server** cho mỗi Job. Kubernetes, MIG, GPU sharing, time-sharing, preemption và reclaim tự động ngoài allocation expiry không thuộc execution flow hiện có; checkpoint có contract riêng như mục Phase A phía trên.
 
 ## Cách đọc và source of truth
 
@@ -659,7 +699,7 @@ Các links trỏ trực tiếp vào workspace source. Cột Diagram cho biết n
 | Production quota ledger, user/project RBAC | NOT_IMPLEMENTED | D7, B1 | [DevelopmentFacts][policy], [BFF][bff], [publicAuth][security] |
 | PostgreSQL metadata | ACTIVE, chưa chạy kiểm chứng | D1/P2 | store/postgres; runtime vẫn gob |
 | HA / distributed scheduling lock | NOT_IMPLEMENTED | P2 | local one-writer lock |
-| MIG/sharing/time-sharing/preemption/reclaim/checkpoint | NOT_IMPLEMENTED | D1, D7 | Ngoài scope; whole-GPU filter và [validation][validation]; NVML đánh dấu MIG enabled không healthy |
+| MIG/sharing/time-sharing/preemption/reclaim | NOT_IMPLEMENTED | D1, D7 | Ngoài scope; whole-GPU filter và [validation][validation]; NVML đánh dấu MIG enabled không healthy |
 
 ## Design observations / Inconsistencies
 

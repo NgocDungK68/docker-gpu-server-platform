@@ -166,7 +166,10 @@ type GPUProcess struct {
 }
 
 type Job struct {
-	OrganizationID string `json:"organizationId"`
+	Training          TrainingState     `json:"training"`
+	TrainingToken     string            `json:"-"`
+	TerminationReason TerminationReason `json:"terminationReason,omitempty"`
+	OrganizationID    string            `json:"organizationId"`
 	AllocationIntent
 	Policy         PolicyDecision     `json:"policy"`
 	ID             string             `json:"id"`

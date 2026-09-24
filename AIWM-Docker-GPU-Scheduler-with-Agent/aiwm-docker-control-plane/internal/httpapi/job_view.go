@@ -10,6 +10,9 @@ import (
 
 // JobView is a public read model. Secret environment values never leave the server API.
 type JobView struct {
+	Training          domain.TrainingState     `json:"training"`
+	TerminationReason domain.TerminationReason `json:"terminationReason,omitempty"`
+	Resumable         bool                     `json:"resumable"`
 	domain.TimeWindow
 	OrganizationID string `json:"organizationId"`
 	NecessityLabel string `json:"necessityLabel"`
@@ -47,7 +50,7 @@ func publicJob(j domain.Job) JobView {
 	for key := range j.Environment {
 		environment[key] = "[redacted]"
 	}
-	return JobView{TimeWindow: j.RequestedWindow(), OrganizationID: j.OrganizationID, NecessityLabel: policy.NecessityLabel(j.NecessityLevel), AllocationIntent: j.AllocationIntent, Policy: j.Policy, ID: j.ID, Name: j.Name, Image: j.Image, Backend: j.Backend, Command: j.Command, Environment: environment,
+	return JobView{Training: j.Training, TerminationReason: j.TerminationReason, Resumable: j.Resumable(), TimeWindow: j.RequestedWindow(), OrganizationID: j.OrganizationID, NecessityLabel: policy.NecessityLabel(j.NecessityLevel), AllocationIntent: j.AllocationIntent, Policy: j.Policy, ID: j.ID, Name: j.Name, Image: j.Image, Backend: j.Backend, Command: j.Command, Environment: environment,
 		Resources: j.Resources, Priority: j.Priority, ServerSelector: j.ServerSelector, Strategy: j.Strategy, Status: j.Status,
 		StatusReason: j.StatusReason, Assignment: j.Assignment, CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
 		LastObservedAt: j.LastObservedAt, ContainerID: j.ContainerID, Events: j.Events}

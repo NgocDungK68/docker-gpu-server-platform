@@ -126,7 +126,22 @@ export interface Assignment {
   reason: string;
 }
 
+export interface TrainingState {
+  checkpointStatus: "" | "NONE" | "REQUESTED" | "SAVING" | "AVAILABLE" | "FAILED";
+  latestCheckpointURI?: string;
+  checkpointCreatedAt?: string;
+  checkpointStep?: number;
+  checkpointWarningAt?: string;
+  artifactStatus: "" | "NONE" | "SAVING" | "READY" | "FAILED";
+  finalArtifactURI?: string;
+  artifactCreatedAt?: string;
+  resumeCheckpointURI?: string;
+  resumeFromJobId?: string;
+}
 export interface Job extends Partial<AllocationIntent> {
+  training?: TrainingState;
+  terminationReason?: "COMPLETED" | "TIME_LIMIT" | "USER_CANCELLED" | "EXECUTION_ERROR" | "SYSTEM_ERROR";
+  resumable?: boolean;
   requestedStartAt: string;
   requestedEndAt: string;
   organizationId: string;
@@ -166,6 +181,7 @@ export interface AllocationIntent {
 }
 export type PerformanceProfile = "AUTO" | "HIGH_PERFORMANCE";
 export interface CreateJobInput extends AllocationIntent {
+  resumeFromJobId?: string;
   name: string;
   image: string;
   backend: "DOCKER";

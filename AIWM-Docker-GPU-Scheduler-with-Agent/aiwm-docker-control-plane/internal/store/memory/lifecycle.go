@@ -20,6 +20,12 @@ func (s *Store) RequestStop(_ context.Context, jobID string, command domain.Comm
 	if job.Status.Terminal() || job.Status == domain.JobStopping {
 		return cloneJob(job), nil
 	}
+	if job.TerminationReason == "" {
+		job.TerminationReason = domain.TerminationUserCancelled
+		if w := job.RequestedWindow(); w.Valid() && !at.Before(w.EndAt) {
+			job.TerminationReason = domain.TerminationTimeLimit
+		}
+	}
 	if job.Status == domain.JobQueued {
 		s.transitionLocked(&job, domain.JobCancelled, "cancelled before placement", at)
 	} else if job.Assignment != nil {
@@ -53,6 +59,15 @@ func (s *Store) RequestStop(_ context.Context, jobID string, command domain.Comm
 func (s *Store) transitionLocked(job *domain.Job, status domain.JobStatus, reason string, at time.Time) {
 	if job.Status.Terminal() || (job.Status == status && job.StatusReason == reason) {
 		return
+	}
+	if status == domain.JobSucceeded {
+		job.TerminationReason = domain.TerminationCompleted
+	}
+	if status == domain.JobFailed && job.TerminationReason == "" {
+		job.TerminationReason = domain.TerminationSystemError
+	}
+	if status == domain.JobCancelled && job.TerminationReason == "" {
+		job.TerminationReason = domain.TerminationUserCancelled
 	}
 	job.Status, job.StatusReason, job.UpdatedAt = status, reason, at
 	job.Events = append(job.Events, domain.JobEvent{JobID: job.ID, Status: status, Reason: reason, At: at})
@@ -93,6 +108,7 @@ func (s *Store) applyAckLocked(command domain.Command, ack domain.CommandAckRequ
 				s.transitionLocked(&job, domain.JobStarting, "start acknowledged; awaiting observed container", at)
 			}
 		} else if job.Status == domain.JobAssigned || job.Status == domain.JobStarting || job.Status == domain.JobStopping {
+			job.TerminationReason = domain.TerminationExecutionError
 			s.transitionLocked(&job, domain.JobFailed, "agent could not launch managed container", at)
 			s.releaseLocked(&job, at)
 		}
@@ -137,12 +153,15 @@ func (s *Store) reconcileObservedLocked(serverID string, report domain.Inventory
 			case "exited", "dead":
 				status := domain.JobFailed
 				reason := "managed container terminated without a successful exit"
-				if job.Status == domain.JobStopping {
+				if job.Status == domain.JobStopping || job.TerminationReason == domain.TerminationTimeLimit {
 					status, reason = domain.JobStopped, "managed container observed stopped"
 				} else if observed.ExitCode != nil && *observed.ExitCode == 0 {
 					status, reason = domain.JobSucceeded, "managed container exited successfully"
 				} else if observed.ExitCode != nil {
 					reason = fmt.Sprintf("managed container exited with code %d", *observed.ExitCode)
+				}
+				if status == domain.JobFailed {
+					job.TerminationReason = domain.TerminationExecutionError
 				}
 				s.transitionLocked(&job, status, reason, report.ReceivedAt)
 				s.releaseLocked(&job, report.ReceivedAt)

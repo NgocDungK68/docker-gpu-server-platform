@@ -13,6 +13,8 @@ import (
 
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/application"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/config"
+"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/ports"
+"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/objectstore/s3"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/httpapi"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/policy"
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/store/durable"
@@ -53,7 +55,15 @@ func main() {
 		os.Exit(1)
 	}
 	defer repository.Close()
-	controlPlane := application.New(repository, application.Options{
+	var objects ports.ObjectStore
+ if configuration.ObjectStorage.Endpoint!="" {
+  storageCtx,cancel:=context.WithTimeout(context.Background(),30*time.Second)
+  objects,err=s3.New(storageCtx,configuration.ObjectStorage)
+  cancel()
+  if err!=nil { logger.Error("Không mở được object storage; kiểm tra cấu hình S3/bucket"); os.Exit(1) }
+ }
+ controlPlane := application.New(repository, application.Options{
+ ObjectStore: objects, Training: configuration.Training,
 		Metadata: metadata,
 		EnrollmentToken: configuration.EnrollmentToken, HeartbeatInterval: configuration.HeartbeatInterval,
 		OfflineAfter: configuration.OfflineAfter, CommandLease: configuration.CommandLease,

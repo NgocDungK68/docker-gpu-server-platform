@@ -14,7 +14,7 @@ import (
 // sessionAuth xác thực mỗi request từ PostgreSQL; không fallback token dùng chung.
 func sessionAuth(identity *application.IdentityService,next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter,r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path,"/api/v1/") || strings.HasPrefix(r.URL.Path,"/api/v1/agents/") || r.URL.Path=="/api/v1/auth/login" {
+		if !strings.HasPrefix(r.URL.Path,"/api/v1/") || strings.HasPrefix(r.URL.Path,"/api/v1/agents/") || strings.HasPrefix(r.URL.Path,"/api/v1/training/") || r.URL.Path=="/api/v1/auth/login" {
 			next.ServeHTTP(w,r); return
 		}
 		p,err:=identity.Authenticate(r.Context(),bearerToken(r.Header.Get("Authorization")))

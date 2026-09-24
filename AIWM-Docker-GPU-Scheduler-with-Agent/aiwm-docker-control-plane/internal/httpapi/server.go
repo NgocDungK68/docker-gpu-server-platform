@@ -23,12 +23,13 @@ type Server struct {
 // Options defines public API credentials separately from per-agent authentication.
 type Options struct {
 	PublicAPIToken string // Chỉ tương thích test harness cũ; production dùng Identity.
-	Identity *application.IdentityService
+	Identity       *application.IdentityService
 }
 
 func New(controlPlane *application.ControlPlane, logger *slog.Logger, corsOrigins []string, options ...Options) *Server {
 	server := &Server{controlPlane: controlPlane, logger: logger}
 	mux := http.NewServeMux()
+	server.mountTraining(mux)
 	mux.HandleFunc("GET /healthz", server.health)
 	mux.HandleFunc("GET /readyz", server.ready)
 	mux.HandleFunc("GET /api/v1/system/summary", server.summary)
@@ -57,8 +58,8 @@ func New(controlPlane *application.ControlPlane, logger *slog.Logger, corsOrigin
 	var handler http.Handler = mux
 	if len(options) > 0 {
 		if options[0].Identity != nil {
-			mountIdentity(mux,options[0].Identity)
-			handler = sessionAuth(options[0].Identity,handler)
+			mountIdentity(mux, options[0].Identity)
+			handler = sessionAuth(options[0].Identity, handler)
 		} else {
 			handler = publicAuth(options[0].PublicAPIToken, handler)
 		}

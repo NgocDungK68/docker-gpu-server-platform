@@ -528,6 +528,121 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/jobs/{jobID}/continue:
+    post:
+      tags: [Jobs]
+      operationId: continueTraining
+      summary: Xin cấp phát mới từ checkpoint của Training đã hết thời gian
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [neededAt, ttlSeconds]
+              properties:
+                neededAt: {type: string, format: date-time}
+                ttlSeconds: {type: integer, minimum: 1}
+      responses:
+        '201':
+          description: Job QUEUED mới; policy/calendar xử lý như mọi request mới
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/Job'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: Không tìm thấy hoặc khác organization}
+        '409': {description: Job chưa đủ điều kiện tiếp tục hoặc storage chưa bật}
+  /api/v1/jobs/{jobID}/artifact:
+    get:
+      tags: [Jobs]
+      operationId: downloadTrainingArtifact
+      summary: Lấy URL tải final artifact; cùng organization hoặc ADMIN
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      responses:
+        '200':
+          description: URL có chữ ký, không chứa S3 secret; hiệu lực 300 giây
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      url: {type: string, format: uri}
+                      expiresInSeconds: {type: integer, const: 300}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: Không tìm thấy hoặc khác organization}
+        '409': {description: Artifact chưa READY}
+  /api/v1/training/{jobID}:
+    get:
+      tags: [Training]
+      operationId: getTrainingContract
+      summary: Contract cho ứng dụng training; không dùng session user hoặc Agent token
+      security:
+      - TrainingJobToken: []
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      responses:
+        '200':
+          description: Poll để nhận cảnh báo/checkpoint request hoặc URL resume đã xác thực
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      jobId: {type: string}
+                      endAt: {type: string, format: date-time}
+                      checkpointRequested: {type: boolean}
+                      stopRequested: {type: boolean}
+                      training: {$ref: '#/components/schemas/TrainingState'}
+                      resumeURL: {type: string, format: uri}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /api/v1/training/{jobID}/{kind}:
+    put:
+      tags: [Training]
+      operationId: uploadTrainingOutput
+      summary: Stream checkpoint hoặc artifact; READY chỉ sau khi object storage lưu thành công
+      security:
+      - TrainingJobToken: []
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      - in: path
+        name: kind
+        required: true
+        schema: {type: string, enum: [checkpoint, artifact]}
+      - in: query
+        name: step
+        schema: {type: integer, minimum: 0, default: 0}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '200':
+          description: Metadata đã được commit; yêu cầu Content-Length, giới hạn từ typed config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/TrainingState'}
+        '400': {description: kind hoặc step không hợp lệ}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Upload đang chạy hoặc final artifact đã READY}
+        '413': {description: Thiếu Content-Length hoặc vượt giới hạn}
+        '500': {description: Upload hoặc commit metadata thất bại}
   /api/v1/queue:
     get:
       parameters:
@@ -1323,6 +1438,10 @@ paths:
         - {"in": "path", "name": "enrollmentID", "required": true, "schema": {"type": "string"}}
 components:
   securitySchemes:
+    TrainingJobToken:
+      type: http
+      scheme: bearer
+      description: Token riêng từng Job được inject vào container; không cấp quyền API người dùng.
     agentBearer:
       type: http
       scheme: bearer
@@ -1787,6 +1906,24 @@ components:
         graceSeconds:
           type: integer
           minimum: 0
+    TrainingState:
+      type: object
+      description: Metadata riêng với JobStatus; snapshot cũ có thể có status rỗng. Không chứa binary/token/lease.
+      properties:
+        checkpointStatus:
+          type: string
+          enum: [NONE, REQUESTED, SAVING, AVAILABLE, FAILED, '']
+        latestCheckpointURI: {type: string}
+        checkpointCreatedAt: {type: string, format: date-time}
+        checkpointStep: {type: integer, minimum: 0}
+        checkpointWarningAt: {type: string, format: date-time}
+        artifactStatus:
+          type: string
+          enum: [NONE, SAVING, READY, FAILED, '']
+        finalArtifactURI: {type: string}
+        artifactCreatedAt: {type: string, format: date-time}
+        resumeCheckpointURI: {type: string}
+        resumeFromJobId: {type: string}
     CreateJobRequest:
       type: object
       required:
@@ -1800,6 +1937,9 @@ components:
       - neededAt
       - ttlSeconds
       properties:
+        resumeFromJobId:
+          type: string
+          description: Backend lấy URI từ Job nguồn cùng organization; không nhận URI do client tự nhập.
         name:
           type: string
           minLength: 3
@@ -1998,6 +2138,12 @@ components:
     Job:
       type: object
       properties:
+        training:
+          $ref: '#/components/schemas/TrainingState'
+        resumable: {type: boolean}
+        terminationReason:
+          type: string
+          enum: [COMPLETED, TIME_LIMIT, USER_CANCELLED, EXECUTION_ERROR, SYSTEM_ERROR]
         requestedStartAt:
           type: string
           format: date-time

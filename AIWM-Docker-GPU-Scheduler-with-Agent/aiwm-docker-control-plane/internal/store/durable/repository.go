@@ -118,3 +118,8 @@ func (s *Store) AckCommand(ctx context.Context, agentID, commandID string, ack d
 	return transact(s, func() (domain.Command, error) { return s.core.AckCommand(ctx, agentID, commandID, ack, at) })
 
 }
+
+// UpdateTraining persists publication metadata in the same operational snapshot.
+func (s *Store) UpdateTraining(ctx context.Context, id string, expected uint64, next domain.TrainingState, at time.Time) (domain.Job, error) {
+	return transact(s, func() (domain.Job, error) { return s.core.UpdateTraining(ctx, id, expected, next, at) })
+}

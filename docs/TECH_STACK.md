@@ -1,5 +1,19 @@
 # Tech stack AIWM
 
+## Bổ sung storage Training — Phase A (24/09/2026)
+
+| Công nghệ / boundary | Nhiệm vụ thực tế | Integration |
+|---|---|---|
+| S3-compatible object storage | Lưu checkpoint/model archive; không lưu binary trong PostgreSQL/gob. | `ports.ObjectStore` |
+| minio-go v7.0.95 | Go SDK PUT object và ký GET; domain không phụ thuộc MinIO. | `internal/objectstore/s3/store.go` |
+| MinIO | Storage DEMO, volume riêng trong `compose.training.yaml`; credential mẫu chỉ cho development. | `quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z` |
+| HTTP streaming + bearer từng Job | App upload archive, poll warning và nhận resume URL; frontend chỉ dùng public API có session. | `internal/httpapi/training.go`, `application/training.go` |
+| Python 3.13 image demo | Minh họa lưu state/resume/final output generic; không ML framework, không GPU benchmark. | `demo/training/Dockerfile`, `train.py` |
+
+Metadata checkpoint đi cùng Job trong durable gob hiện có. **PostgreSQL full runtime và Prometheus chưa triển khai ở Phase A.** Go toolchain vẫn chỉ cần ở máy build/development; host Agent production nhận binary đã build. App training có runtime Python vì image demo chọn Python, không phải prerequisite cho mọi training application.
+
+
+
 Tài liệu mô tả công nghệ đang được nối vào source hiện tại, dựa trên [go.mod][gomod], [package.json][package] và các integration points; không phải xác nhận đã triển khai production. Chi tiết lifecycle/algorithms nằm trong [SYSTEM_DESIGN](SYSTEM_DESIGN.md) và [ALGORITHMS](ALGORITHMS.md).
 
 ## Tech stack theo tầng

@@ -1,5 +1,28 @@
 # Domain model AIWM — implementation hiện tại
 
+## Training output — bổ sung Phase A (24/09/2026)
+
+`Job.Training: TrainingState` chứa metadata, không chứa model bytes và không thay `JobStatus`.
+
+| Field/type | Ý nghĩa và owner |
+|---|---|
+| CheckpointStatus | NONE → REQUESTED khi warning; SAVING khi app PUT; AVAILABLE sau object + metadata commit; FAILED nếu chưa có checkpoint dùng được. Upload thay thế lỗi vẫn giữ AVAILABLE của bản trước. |
+| LatestCheckpointURI / CheckpointCreatedAt / CheckpointStep | URI immutable của lần publish thành công gần nhất; timestamp CP; step do app báo, không phải training progress suy từ GPU. |
+| CheckpointWarningAt | Tính một lần từ requested window khi tạo TRAINING có storage; `max(StartAt, EndAt-clamp(0.1*duration,5m,30m))`, các hệ số/lead từ typed config. |
+| ArtifactStatus | NONE → SAVING → READY/FAILED. SUCCEEDED không tự chuyển READY. |
+| FinalArtifactURI / ArtifactCreatedAt | Output cuối đã upload; READY không đồng nghĩa Checkpoint AVAILABLE. |
+| ResumeFromJobID / ResumeCheckpointURI | CP copy từ Job nguồn cùng organization; immutable sau admission. |
+| TerminationReason | Job.COMPLETED khi exit0 tự nhiên; TIME_LIMIT khi expiry request STOP; USER_CANCELLED khi user stop; EXECUTION_ERROR khi START/exit lỗi; SYSTEM_ERROR cho lỗi hệ thống khác. |
+| TrainingToken, Revision, UploadID/Kind/StartedAt | Private persisted fields cho quyền từng Job và CAS upload lease; không serialize vào public JSON. |
+
+`Job.Resumable()` cần TRAINING + STOPPED + TIME_LIMIT + checkpoint AVAILABLE + URI không rỗng. Continuation tạo Job mới, đi qua policy/queue/time planning như bình thường và có thể dùng Server khác cùng Organization. Quan hệ: `Organization → Job nguồn → checkpoint S3 ← Job tiếp tục`; không phụ thuộc filesystem server cũ.
+
+Source of truth hiện tại: domain `internal/domain/training.go`, application `training.go`, repository `UpdateTraining` (memory lock/CAS + durable transaction/gob); object bytes qua `ports.ObjectStore` và `internal/objectstore/s3`. PostgreSQL runtime chưa được implement trong Phase A. Public DTO `httpapi.JobView` chỉ trả training metadata/terminationReason/resumable; URI do backend xác lập, không nhận URI tùy ý từ người dùng.
+
+Nguồn state transition: `application.processReservations/requestCheckpoint/recoverTrainingUpload/SaveTrainingOutput`; `memory.RequestStop/transitionLocked/reconcileObservedLocked`. Checkpoint không preempt, không gia hạn, không stop existing workload. Upload lease hết hạn được phục hồi bằng scheduler/reconcile loop; old revision không được publish đè. Test: `application/training_test.go`, `store/durable/training_test.go`, `httpapi/training_test.go`.
+
+
+
 Tài liệu mô tả source đang có trong workspace, không mô tả thiết kế tương lai. Các giá trị viết hoa giữ đúng literal trong Go/API; tên như **External**, **Workload**, **Reservation** cần đọc cùng phần ánh xạ dưới đây. Backend thực thi standalone Docker, cấp phát nguyên GPU trên một server cho mỗi Job.
 
 Nguồn định nghĩa chính: [domain/model.go][model]. Nguồn hành vi: [application/controlplane.go][cp], [memory/store.go][store], [memory/lifecycle.go][lifecycle], [memory/accounting.go][accounting]. Các state machine dưới đây tổng hợp các nhánh đang được gọi; code chưa có một bảng chuyển trạng thái tập trung.

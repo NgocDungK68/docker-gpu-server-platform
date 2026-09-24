@@ -78,6 +78,16 @@ func (c *ControlPlane) prepareJob(ctx context.Context, r domain.CreateJobRequest
 	if !window.Valid() || !now.Before(window.EndAt) {
 		return domain.Job{}, &domain.ValidationError{Fields: map[string]string{"ttlSeconds": "Khoảng thời gian sử dụng phải hợp lệ và chưa kết thúc"}}
 	}
+	if r.ResumeFromJobID != "" {
+		source, e := c.GetJob(ctx, r.ResumeFromJobID)
+		if e != nil {
+			return domain.Job{}, e
+		}
+		if c.objects == nil || !source.Resumable() || source.OrganizationID != job.OrganizationID || job.WorkloadType != domain.WorkloadTraining {
+			return domain.Job{}, domain.ErrConflict
+		}
+		job.Training.ResumeFromJobID, job.Training.ResumeCheckpointURI = source.ID, source.Training.LatestCheckpointURI
+	}
 	job.Policy, err = c.policy.Evaluate(ctx, job, now)
 	return job, err
 }

@@ -20,6 +20,8 @@ import (
 )
 
 type ControlPlane struct {
+	objects           ports.ObjectStore
+	training          TrainingOptions
 	metadata          ports.MetadataRepository
 	policy            policy.Evaluator
 	catalog           capability.Resolver
@@ -34,7 +36,9 @@ type ControlPlane struct {
 }
 
 type Options struct {
-	Metadata ports.MetadataRepository
+	ObjectStore ports.ObjectStore
+	Training    TrainingOptions
+	Metadata    ports.MetadataRepository
 	// PlacementPolicy optionally replaces the configured scorer at composition time.
 	PlacementPolicy   SchedulingPolicy
 	Policy            policy.Evaluator
@@ -48,6 +52,7 @@ type Options struct {
 }
 
 func New(repository ports.Repository, options Options) *ControlPlane {
+	options.Training = options.Training.withDefaults()
 	if options.Policy == nil {
 		options.Policy = policy.New(policy.DevelopmentFacts{QuotaGPUs: 4})
 	}
@@ -68,7 +73,8 @@ func New(repository ports.Repository, options Options) *ControlPlane {
 		scheduler = scheduler.WithPolicy(options.DefaultStrategy, options.PlacementPolicy)
 	}
 	return &ControlPlane{policy: options.Policy, catalog: options.Catalog, limits: options.RequestLimits,
-		metadata:          options.Metadata,
+		metadata: options.Metadata,
+		objects:  options.ObjectStore, training: options.Training,
 		repository:        repository,
 		scheduler:         scheduler,
 		enrollmentToken:   options.EnrollmentToken,
@@ -231,6 +237,9 @@ func (c *ControlPlane) CreateJob(ctx context.Context, request domain.CreateJobRe
 	}
 	job.ID, err = newID("job")
 	if err != nil {
+		return domain.Job{}, err
+	}
+	if err := c.initTraining(&job); err != nil {
 		return domain.Job{}, err
 	}
 	job.StatusReason = match.RecommendationText

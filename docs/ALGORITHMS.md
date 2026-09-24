@@ -201,7 +201,7 @@ Preview và submit cùng dùng `prepareJob/matchJob` nhưng là hai request đ�
 | Launch guard | A25 — local occupancy recheck trước start | ACTIVE | Chặn actual consumer mới; same-Job retry exception | [GPUsAvailable][inventory], [Execute][executor] |
 | Planning | NeededAt delayed start / duration STOP | ACTIVE | Calendar PLANNED; execution gate và STOP tại EndAt | domain/reservation.go; application/planning.go |
 | Limits | CPU-RAM pool accounting | NOT_IMPLEMENTED | Docker limits có, chưa accounting tổng capacity | [scheduler][scheduler] |
-| Out of scope | MIG/sharing/preemption/reclaim/checkpoint | NOT_IMPLEMENTED | Chỉ whole physical GPU; không thuật toán tương ứng | [validation][validation], [scheduler][scheduler] |
+| Out of scope | MIG/sharing/preemption/reclaim | NOT_IMPLEMENTED | Chỉ whole physical GPU; không thuật toán tương ứng | [validation][validation], [scheduler][scheduler] |
 
 ## Policy/Priority và Scheduler/Placement
 
@@ -1332,3 +1332,10 @@ Paths dưới đây thuộc backend `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-d
 [agent-config]: ../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/agent/config/config.go
 [nvml]: ../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/agent/gpu/nvml_linux.go
 [executor]: ../AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/agent/executor.go
+
+
+## Cảnh báo checkpoint theo allocation — Phase A
+
+Với Training mới có object storage: `lead = clamp(duration * WarningFraction, MinWarningLead, MaxWarningLead)`; `warningAt = max(StartAt, EndAt - lead)`. Mặc định 0.1, 5m, 30m. Đây là lifecycle notification trong `application.processReservations`, không thay ranking/placement/calendar.
+
+RUNNING, warningAt <= now < EndAt, không có upload đang hoạt động và chưa có checkpoint thành công kể từ warningAt → REQUESTED. App poll và upload; không có app hỗ trợ contract thì AIWM không tự tạo checkpoint. Tới EndAt vẫn STOP graceful hiện có; không gia hạn reservation vì SAVING. Continuation tạo Job mới cạnh tranh bằng policy cũ. Source: `application/training.go`; tests: `application/training_test.go`.

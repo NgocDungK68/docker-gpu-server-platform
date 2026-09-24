@@ -72,7 +72,7 @@ func validateJobRequest(r domain.CreateJobRequest, limits RequestLimits, catalog
 	}
 	for key, value := range r.Environment {
 		if !environmentKey.MatchString(key) || len(value) > 8192 || strings.ContainsRune(value, 0) ||
-			strings.HasPrefix(key, "NVIDIA_") || key == "CUDA_VISIBLE_DEVICES" {
+			strings.HasPrefix(key, "AIWM_") || strings.HasPrefix(key, "NVIDIA_") || key == "CUDA_VISIBLE_DEVICES" {
 			fields["environment"] = "Biến môi trường không hợp lệ; GPU visibility do Agent quản lý"
 		}
 	}

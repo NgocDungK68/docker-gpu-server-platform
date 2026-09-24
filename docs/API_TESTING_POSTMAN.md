@@ -1,5 +1,22 @@
 # API và kiểm thử bằng Postman
 
+## Training checkpoint/artifact — Phase A
+
+Các endpoint mới đã có trong backend OpenAPI. BFF chỉ cho phép continuation và download; không proxy training application endpoints.
+
+| API | Auth | Kết quả |
+|---|---|---|
+| POST /api/v1/jobs/{jobID}/continue | Session user; cùng organization hoặc ADMIN, Job mới vẫn theo context submit hiện có | Body `{"neededAt":"<RFC3339 mới>","ttlSeconds":3600}` → Job QUEUED mới, 201. Nguồn phải STOPPED/TIME_LIMIT/checkpoint AVAILABLE. |
+| GET /api/v1/jobs/{jobID}/artifact | Session, kiểm organization | READY → `data.url` có chữ ký, `expiresInSeconds=300`. Chưa READY: 409; khác organization: 404. |
+| GET /api/v1/training/{jobID} | Bearer `AIWM_TRAINING_TOKEN` inject riêng cho container | checkpointRequested, stopRequested, endAt, training, resumeURL nếu có nguồn. Không dùng access_token người dùng. |
+| PUT /api/v1/training/{jobID}/checkpoint?step=N | Bearer từng Job | Binary archive, Content-Length bắt buộc → AVAILABLE chỉ sau PUT S3 và metadata commit. |
+| PUT /api/v1/training/{jobID}/artifact | Bearer từng Job | Binary archive → READY; không nhận URI tùy ý hay secret S3 từ client. |
+
+Public Job thêm `training`, `terminationReason`, `resumable`. CreateJobRequest có `resumeFromJobId` tùy chọn để tạo request mới, backend xác thực nguồn và tự lấy URI. Nội bộ `AIWM_*` env bị từ chối trong user input. Khi storage chưa bật, Job cũ chạy như trước, không tự phát sinh checkpoint.
+
+Token application chỉ dùng trong interval đã dispatch và grace STOP có giới hạn; không được đọc Job khác hoặc public Job API. Không chép token này vào collection Git. Postman dùng access_token hiện có để gọi hai public endpoints; flow training thật chạy bằng image/script và test ở đầu `TESTING_RUNBOOK.md`. UI/action thuộc Phase B chưa triển khai.
+
+
 Cập nhật Organization/session/enrollment ngày 17/09/2026 bằng inspection tĩnh. Không chạy API, migration, Newman hoặc build/test trong task. Backend source là authority; xem [TESTING_RUNBOOK](TESTING_RUNBOOK.md) để khởi động PostgreSQL/CP/frontend/Agent.
 
 

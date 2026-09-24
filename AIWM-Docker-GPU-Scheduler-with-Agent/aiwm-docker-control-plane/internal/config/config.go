@@ -9,9 +9,13 @@ import (
 	"time"
 
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/domain"
+"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/application"
+"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/objectstore/s3"
 )
 
 type Config struct {
+ ObjectStorage s3.Config
+ Training application.TrainingOptions
 	DatabaseURL string
 	BootstrapOrganizationCode string
 	BootstrapOrganizationName string
@@ -58,6 +62,8 @@ func Load() (Config, error) {
 		LogLevel:          env("AIWM_LOG_LEVEL", "info"),
 	}
 	var err error
+ config.ObjectStorage,config.Training,err=loadTraining()
+ if err!=nil { return Config{},err }
 	if config.DevelopmentInSizingPlan, err = BoolEnv("AIWM_DEV_IN_SIZING_PLAN", false); err != nil {
 		return Config{}, err
 	}

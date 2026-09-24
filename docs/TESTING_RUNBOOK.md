@@ -1,5 +1,110 @@
 # Runbook kiểm thử AIWM
 
+## Training checkpoint/artifact — checkpoint Phase A (24/09/2026)
+
+**Đã kiểm chứng:** HTTP Control Plane + durable repository + MinIO thật + ứng dụng Python thật: cảnh báo → checkpoint → TIME_LIMIT → Job mới trên server khác → resume → final artifact READY → tải đúng dữ liệu → GPU release. Inventory/Agent được điều khiển tại repository trong test; đây **chưa phải full Agent Sim E2E hoặc GPU Linux E2E**. Agent Sim hiện chỉ mô phỏng Docker operations, không thực thi Python bên trong image.
+
+**Chưa triển khai trong checkpoint này:** Workloads UI mới, PostgreSQL runtime, Prometheus, VAI/VCS và simulation mở rộng. Các mục cũ bên dưới giữ hướng dẫn demo đã có; không suy ra các phase mới đã chạy.
+
+### Chạy lại contract demo trên Windows + Docker Desktop
+
+Điều kiện: đang ở workspace root, Docker Desktop Linux containers, Go theo go.mod, Python 3. Có thể giữ stack AIWM hiện có trên 8080/3000: test dùng HTTP port ngẫu nhiên và snapshot trong thư mục test riêng. Cổng 19000/19001 phải trống.
+
+~~~powershell
+docker compose -p aiwm-training-check -f compose.training.yaml up -d
+$env:AIWM_TEST_S3_ENDPOINT='http://127.0.0.1:19000'
+$env:AIWM_TEST_S3_ACCESS_KEY='aiwm-demo-only'
+$env:AIWM_TEST_S3_SECRET_KEY='AIWM-Demo-S3-2026!'
+cd AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane
+go test ./internal/httpapi -run TestTrainingMinIOContract -count=1 -v
+~~~
+
+Credential ở đây là **DEMO / DEVELOPMENT ONLY — KHÔNG DÙNG CHO PRODUCTION**. MinIO console: http://127.0.0.1:19001. Nếu vừa tạo container mà storage chưa sẵn sàng, đợi container khởi động rồi chạy lại test. Không cần chờ nhiều giờ: allocation test đầu 3 giây, continuation 30 giây và ứng dụng hoàn thành sớm.
+
+Kết quả mong đợi:
+
+1. Request TRAINING được reserve/dispatch qua application hiện có.
+2. Bản checkpoint chứa step thực của ứng dụng được upload vào MinIO; metadata đi qua durable transaction.
+3. Trước EndAt không TIME_LIMIT. Đến EndAt có STOPPING + TIME_LIMIT; observation xác nhận dừng mới release.
+4. Server nguồn ngừng nhận Job mới; continuation reserve GPU của server khác cùng organization.
+5. Ứng dụng tải checkpoint bằng URL có chữ ký, tiếp tục đúng step rồi upload final output.
+6. Job SUCCEEDED + COMPLETED, ArtifactStatus READY; download trả đúng nội dung; GPU FREE.
+7. Console Go in `PASS: warning -> real MinIO checkpoint -> TIME_LIMIT -> new server resume -> final artifact -> signed download -> GPU release`.
+
+Test tạo bucket `aiwm-test-<timestamp>` riêng từng lần. Snapshot test tự dọn; object còn trên volume MinIO cho đến khi bạn chủ động xóa volume test. Dừng storage, giữ dữ liệu:
+
+~~~powershell
+cd ../..
+docker compose -p aiwm-training-check -f compose.training.yaml down
+~~~
+
+Không chạy cleanup toàn Docker. `down --volumes` chỉ phù hợp nếu muốn bỏ **toàn bộ dữ liệu của project test aiwm-training-check**, không dùng với storage đang chứa checkpoint cần giữ.
+
+Trong WSL, cùng flow nhưng đặt biến bằng `export` và chỉ định Python:
+
+~~~bash
+docker compose -p aiwm-training-check -f compose.training.yaml up -d
+export AIWM_TEST_S3_ENDPOINT=http://127.0.0.1:19000
+export AIWM_TEST_S3_ACCESS_KEY=aiwm-demo-only
+export AIWM_TEST_S3_SECRET_KEY='AIWM-Demo-S3-2026!'
+export AIWM_TEST_PYTHON=python3
+cd AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane
+go test ./internal/httpapi -run TestTrainingMinIOContract -count=1 -v
+~~~
+
+Windows contract test đã PASS; phiên này chưa chạy lại lệnh WSL.
+
+### Test lỗi, authorization và lifecycle
+
+Từ backend:
+
+~~~powershell
+go test ./internal/application ./internal/httpapi ./internal/store/memory ./internal/store/durable ./internal/domain ./internal/policy ./internal/config ./internal/objectstore/s3
+~~~
+
+Các test `training_test.go` kiểm warning clamp/no early stop; failed upload giữ checkpoint cũ; upload lease/revision ngăn callback cũ; metadata tồn tại sau reopen/disk rollback; token riêng Job; khác organization không download/continue; SUCCEEDED không tự biến artifact thành READY.
+
+### Image ứng dụng demo và cấu hình runtime
+
+Từ workspace root:
+
+~~~powershell
+docker build -t aiwm-training-demo:local demo/training
+docker run --rm --network none aiwm-training-demo:local --help
+~~~
+
+Image và lệnh `--help` đã build/run PASS. `demo/training/train.py` chỉ tạo JSON minh họa state/output, **không train model ML thật và không đo hiệu suất GPU**. Image có entrypoint sẵn; command có thể là `["--steps","120","--step-seconds","1","--checkpoint-every","5"]`. Muốn chạy trên Docker GPU host thật, team phải phân phối image đến host/registry mà Agent có thể pull. GPU allocation vẫn đi qua Job API; không thêm flags chọn GPU vào app.
+
+Control Plane bật contract khi `AIWM_S3_ENDPOINT` khác rỗng. Cấu hình trong backend `.env.example`, hoặc env cùng tên đã được pass vào service `control-plane` ở `compose.yaml`:
+
+| Biến | Ý nghĩa / mặc định |
+|---|---|
+| AIWM_S3_ENDPOINT | Endpoint CP dùng để PUT; để trống = chưa bật contract. |
+| AIWM_S3_PUBLIC_ENDPOINT | Endpoint ký GET mà **training container và người tải model đều truy cập được**; trống dùng endpoint trên. |
+| AIWM_S3_REGION / AIWM_S3_BUCKET | us-east-1 / aiwm-artifacts. |
+| AIWM_S3_ACCESS_KEY / AIWM_S3_SECRET_KEY | Credential service phía CP, không gửi cho frontend/container. |
+| AIWM_S3_CREATE_BUCKET | false; demo có thể true để tạo bucket thiếu. |
+| AIWM_TRAINING_API_URL | Base URL CP mà **training container** truy cập được; bắt buộc khi bật S3. |
+| AIWM_CHECKPOINT_WARNING_FRACTION | 0.1. |
+| AIWM_CHECKPOINT_WARNING_MIN / MAX | 5m / 30m; min không lớn hơn max. |
+| AIWM_TRAINING_MAX_UPLOAD_BYTES | 5368709120 (5 GiB), mỗi archive có Content-Length. |
+| AIWM_TRAINING_UPLOAD_TIMEOUT | 15m, còn bị giới hạn bởi EndAt + STOP grace. |
+
+Không dùng `localhost` của Control Plane làm URL cho container trên server khác. Hai URL phải phù hợp DNS/network thực tế; khi dùng Docker Compose cần phân biệt endpoint nội bộ PUT với endpoint GET bên ngoài. Không đưa secret production vào file Git. Dùng HTTPS trên đường truyền production.
+
+Metadata Phase A vẫn trong runtime gob; PostgreSQL hiện chỉ có business metadata. Không bật `AIWM_RUNTIME_STORE=postgres` vì adapter đó **chưa được triển khai ở checkpoint này**. Binary model/checkpoint nằm trong S3-compatible storage.
+
+### Contract ứng dụng và giới hạn
+
+CP inject `AIWM_JOB_ID`, `AIWM_TRAINING_URL`, `AIWM_TRAINING_TOKEN`, `AIWM_ALLOCATION_END_AT`, `AIWM_RESUME_CHECKPOINT_URI`. `AIWM_CHECKPOINT_URI`/`AIWM_ARTIFACT_URI` ban đầu rỗng; URI mới chỉ tồn tại sau PUT thành công và nằm trong response/metadata. Env user bắt đầu bằng `AIWM_` bị từ chối.
+
+Ứng dụng poll GET training contract, gửi archive opaque bằng PUT `/checkpoint?step=N` hoặc `/artifact`. CP stream bytes sang S3, chỉ publish AVAILABLE/READY sau upload và metadata commit; không parse weights/optimizer/RNG. Chọn **polling**, không thêm signal hay command type mới cho Agent. Demo cũng handle SIGTERM và tự checkpoint định kỳ.
+
+Đến EndAt, CP vẫn gửi STOP graceful 30 giây như trước. Upload không gia hạn reservation; GPU chỉ release khi actual inventory an toàn. Publication được chấp nhận trong grace có giới hạn, không kéo dài bằng cách sửa timestamp metadata. Upload dở do crash hết lease sẽ thành FAILED, hoặc giữ AVAILABLE nếu có checkpoint trước. Object upload xong nhưng metadata commit thất bại có thể thành object không được tham chiếu; chưa có garbage collector.
+
+Continuation: `POST /api/v1/jobs/{id}/continue` với `neededAt`, `ttlSeconds` mới. Chỉ `STOPPED + TIME_LIMIT + checkpoint AVAILABLE`; CP tự lấy URI nguồn, đánh giá lại policy và planning, không tăng duration của Job cũ. Download: `GET /api/v1/jobs/{id}/artifact` cùng organization hoặc ADMIN, chỉ khi READY; URL có chữ ký tồn tại 300 giây. UI/action trình bày thuộc Phase B, chưa có trong checkpoint Phase A.
+
+
 
 ## Kiểm thử Resource Allocation Planning theo thời gian (23/09/2026)
 

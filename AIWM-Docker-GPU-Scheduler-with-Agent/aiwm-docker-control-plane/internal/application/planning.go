@@ -75,6 +75,11 @@ func (c *ControlPlane) processReservations(ctx context.Context) error {
 	jobs = scopedJobs(ctx, jobs)
 	sort.Slice(jobs, func(i, j int) bool { return jobs[i].ID < jobs[j].ID })
 	for _, job := range jobs {
+		var recoverErr error
+		job, recoverErr = c.recoverTrainingUpload(ctx, job, c.now().UTC())
+		if recoverErr != nil {
+			return recoverErr
+		}
 		if job.Status.Terminal() {
 			continue
 		}
@@ -97,6 +102,9 @@ func (c *ControlPlane) processReservations(ctx context.Context) error {
 			}
 			continue
 		}
+		if err := c.requestCheckpoint(ctx, job, now); err != nil {
+			return err
+		}
 		if job.Status != domain.JobAssigned || job.Assignment == nil || job.Assignment.ReservationState != "PLANNED" || !window.Contains(now) {
 			continue
 		}
@@ -105,7 +113,7 @@ func (c *ControlPlane) processReservations(ctx context.Context) error {
 		}
 		a := job.Assignment
 		payload, err := json.Marshal(agentv1.StartContainerPayload{
-			JobID: job.ID, Name: "aiwm-" + job.ID, Image: job.Image, Command: job.Command, Environment: job.Environment, GPUUUIDs: a.GPUUUIDs,
+			JobID: job.ID, Name: "aiwm-" + job.ID, Image: job.Image, Command: job.Command, Environment: c.trainingEnvironment(job), GPUUUIDs: a.GPUUUIDs,
 			CPUMilli: job.Resources.CPUMilli, MemoryMiB: job.Resources.MemoryMiB, Labels: map[string]string{"aiwm.managed": "true", "aiwm.job-id": job.ID},
 		})
 		if err != nil {
