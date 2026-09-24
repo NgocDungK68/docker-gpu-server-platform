@@ -4,7 +4,7 @@ import type { AllocationOptions, CreateJobInput } from "../api/types";
 export function parseKeyValueLines(value: string): Record<string, string> {
   return Object.fromEntries(value.split("\n").filter((line) => line.trim()).map((line) => {
     const index = line.indexOf("=");
-    if (index < 1) throw new Error("Má»—i dÃ²ng cáº§n KEY=value");
+    if (index < 1) throw new Error("Mỗi dòng cần có dạng KEY=value");
     return [line.slice(0, index).trim(), line.slice(index + 1)];
   }));
 }
@@ -15,7 +15,7 @@ function keyValueLines(environment: boolean) {
       const index = line.indexOf("=");
       const key = line.slice(0, index).trim();
       if (index < 1 || keys.has(key) || (environment && (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || key.startsWith("NVIDIA_") || key === "CUDA_VISIBLE_DEVICES"))) {
-        context.addIssue({ code: "custom", message: "Cáº§n KEY=value há»£p lá»‡, khÃ´ng trÃ¹ng key; GPU visibility do Agent quáº£n lÃ½." });
+        context.addIssue({ code: "custom", message: "Biến môi trường không hợp lệ, bị trùng hoặc sử dụng tên dành riêng cho hệ thống." });
       }
       keys.add(key);
     }
@@ -29,18 +29,15 @@ function validLocalDateTime(value: string): boolean {
   return Number.isFinite(date.getTime()) && date.getFullYear() === year && date.getMonth() + 1 === month
     && date.getDate() === day && date.getHours() === hour && date.getMinutes() === minute && date.getSeconds() === second;
 }
-const optionalNumber = z.number().int().nonnegative().optional();
 export const jobFormSchema = z.object({
-  name: z.string().trim().min(3, "TÃªn cáº§n Ã­t nháº¥t 3 kÃ½ tá»±").max(128),
-  image: z.string().trim().min(1, "Cáº§n nháº­p Docker image").max(512).regex(/^[^\s\u0000]+$/, "Image khÃ´ng Ä‘Æ°á»£c chá»©a khoáº£ng tráº¯ng"),
+  name: z.string().trim().min(3, "Tên cần ít nhất 3 ký tự").max(128),
+  image: z.string().trim().min(1, "Cần nhập image").max(512).regex(/^[^\s\u0000]+$/, "Image không được chứa khoảng trắng"),
   commandLines: z.string().max(65536),
   environmentLines: keyValueLines(true),
   gpuCount: z.number().int("Số GPU phải là số nguyên").positive("Số GPU phải lớn hơn 0"),
-  performanceProfile: z.string().min(1, "Chọn profile hiệu năng"),
+  performanceProfile: z.enum(["AUTO", "HIGH_PERFORMANCE"]),
   fp8Required: z.boolean(),
-  minVramMiB: z.number().int().positive("VRAM phải lớn hơn 0 MiB"),
-  cpuMilli: optionalNumber,
-  memoryMiB: optionalNumber,
+  minVramGB: z.number().finite().positive("VRAM phải lớn hơn 0 GB").refine(value => Number.isSafeInteger(value * 1024), "VRAM phải quy đổi được thành số MiB nguyên"),
   workloadType: z.enum(["TRAINING", "INFERENCE"], { errorMap: () => ({ message: "Chọn loại workload" }) }),
   necessityLevel: z.enum(["NECESSITY_1", "NECESSITY_2", "NECESSITY_3", "NECESSITY_4"], { errorMap: () => ({ message: "Chọn tính cần thiết" }) }),
   necessityReason: z.string().min(1, "Chọn lý do"),
@@ -49,6 +46,9 @@ export const jobFormSchema = z.object({
   neededAt: z.string().refine(validLocalDateTime, "Chọn ngày và giờ hợp lệ theo giờ địa phương"),
   ttlHours: z.number().positive("Thời lượng phải lớn hơn 0").refine(value => Number.isSafeInteger(value * 3600), "Thời lượng phải quy đổi được thành số giây nguyên"),
 }).strict().superRefine((value, ctx) => {
+  if (validLocalDateTime(value.neededAt) && new Date(value.neededAt).getTime() < Date.now() - 60_000) {
+    ctx.addIssue({ code: "custom", path: ["neededAt"], message: "Chọn thời điểm bắt đầu từ hiện tại hoặc trong tương lai" });
+  }
   if (value.necessityReason === "CUSTOM" && !value.necessityExplanation.trim()) {
     ctx.addIssue({ code: "custom", path: ["necessityExplanation"], message: "Nhập giải trình cho lý do khác" });
   }
@@ -74,9 +74,8 @@ export function allocationInput(form: JobFormValues): CreateJobInput {
     command: form.commandLines.split("\n").map(item => item.trim()).filter(Boolean),
     environment: parseKeyValueLines(form.environmentLines),
     resources: {
-      gpuCount: form.gpuCount, minVramMiB: form.minVramMiB,
+      gpuCount: form.gpuCount, minVramMiB: form.minVramGB * 1024,
       performanceProfile: form.performanceProfile, fp8Required: form.fp8Required,
-      cpuMilli: form.cpuMilli, memoryMiB: form.memoryMiB,
     },
     workloadType:form.workloadType,necessityLevel:form.necessityLevel,necessityReason:form.necessityReason,
     necessityExplanation:form.necessityExplanation.trim() || undefined,systemImportance:form.systemImportance,

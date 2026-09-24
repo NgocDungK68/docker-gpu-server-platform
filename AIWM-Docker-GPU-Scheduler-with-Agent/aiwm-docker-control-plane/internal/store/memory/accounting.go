@@ -12,7 +12,7 @@ func normalizeGPUState(serverID string, gpus []domain.GPU, containers []domain.C
 	managed, reserved := make(map[string]string), make(map[string]string)
 	knownContainers := make(map[string][]string)
 	for _, job := range jobs {
-		if job.Assignment == nil || job.Assignment.ServerID != serverID || job.Status.Terminal() {
+		if job.Assignment == nil || job.Assignment.ServerID != serverID || job.Status.Terminal() || job.Assignment.ReservationState == "PLANNED" {
 			continue
 		}
 		for _, uuid := range job.Assignment.GPUUUIDs {
@@ -26,7 +26,7 @@ func normalizeGPUState(serverID string, gpus []domain.GPU, containers []domain.C
 		knownContainers[c.ID] = c.GPUUUIDs
 		for _, uuid := range c.GPUUUIDs {
 			job, known := jobs[c.JobID]
-			if c.Origin == domain.ContainerManaged && known && job.Assignment != nil && job.Assignment.ServerID == serverID && containsUUID(job.Assignment.GPUUUIDs, uuid) {
+			if c.Origin == domain.ContainerManaged && known && job.Assignment != nil && job.Assignment.CommandID != "" && job.Assignment.ServerID == serverID && containsUUID(job.Assignment.GPUUUIDs, uuid) {
 				if other := managed[uuid]; other != "" && other != job.ID {
 					unknown[uuid] = append(unknown[uuid], "multiple managed consumers")
 				}

@@ -6,8 +6,34 @@ import json
 from pathlib import Path
 import time
 from urllib.request import Request, urlopen
+from urllib.request import build_opener, HTTPCookieProcessor
+from urllib.parse import urlsplit
+from http.cookiejar import CookieJar
 from urllib.error import HTTPError
 from configure import ROOT, read_env
+
+class SessionAPI:
+    """Session thật cho CP trực tiếp hoặc cookie HttpOnly của BFF; không in secret."""
+    def __init__(self, base, username, password):
+        self.base = base.rstrip("/")
+        self.token = ""
+        self.opener = build_opener(HTTPCookieProcessor(CookieJar()))
+        self.identity = self("/auth/login", {"username": username, "password": password})
+        self.token = self.identity.get("token", "")
+
+    def __call__(self, path, body=None):
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
+        origin = urlsplit(self.base)
+        headers["Origin"] = origin.scheme + "://" + origin.netloc
+        request = Request(self.base + path, data=None if body is None else json.dumps(body).encode(), headers=headers)
+        try:
+            with self.opener.open(request, timeout=15) as response:
+                return json.load(response)["data"]
+        except HTTPError as error:
+            # Không đưa response login/enrollment hoặc credentials vào output.
+            raise RuntimeError(f"HTTP {error.code}: {path.split('?')[0]}") from None
 
 def main():
     parser = argparse.ArgumentParser()

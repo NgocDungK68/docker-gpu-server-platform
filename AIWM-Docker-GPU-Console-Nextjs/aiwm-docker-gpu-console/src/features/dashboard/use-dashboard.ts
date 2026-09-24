@@ -1,25 +1,27 @@
 "use client";
 
-import { useQueries } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
+import { useSession } from "@/features/identity/session";
 import { api } from "@/lib/api/api-client";
+import { identityApi } from "@/lib/api/identity";
 import { queryKeys } from "@/lib/api/query-keys";
+import { appConfig } from "@/config/app";
 
 export function useDashboard() {
-  const [summary, servers, gpus, jobs] = useQueries({
-    queries: [
-      { queryKey: queryKeys.summary, queryFn: api.getSummary },
-      { queryKey: queryKeys.servers, queryFn: api.getServers },
-      { queryKey: queryKeys.gpus, queryFn: api.getGPUs },
-      { queryKey: queryKeys.jobs, queryFn: api.getJobs },
-    ],
+  const { user, organizationFilter } = useSession();
+  const admin = user.role === "ADMIN";
+  const servers = useQuery({
+    queryKey: [...queryKeys.servers, organizationFilter],
+    queryFn: () => api.getServers(organizationFilter),
+    refetchInterval: appConfig.refreshIntervalMs,
   });
+  const organizations = useQuery({ queryKey: ["organizations"], queryFn: identityApi.organizations, enabled: admin });
   return {
-    summary: summary.data,
+    admin,
     servers: servers.data ?? [],
-    gpus: gpus.data ?? [],
-    jobs: jobs.data ?? [],
-    isLoading: summary.isLoading || servers.isLoading || gpus.isLoading || jobs.isLoading,
-    error: summary.error ?? servers.error ?? gpus.error ?? jobs.error,
-    refetch: () => Promise.all([summary.refetch(), servers.refetch(), gpus.refetch(), jobs.refetch()]),
+    organizations: (organizations.data ?? []).filter(o => !organizationFilter || o.id === organizationFilter),
+    isLoading: servers.isPending || (admin && organizations.isPending),
+    error: servers.error ?? (admin ? organizations.error : null),
+    refetch: () => Promise.all([servers.refetch(), ...(admin ? [organizations.refetch()] : [])]),
   };
 }

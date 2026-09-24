@@ -28,7 +28,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${appConfig.apiProxyBasePath}${path}`, {
     ...init,
     cache: "no-store",
@@ -43,6 +43,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     | APIEnvelope<T>
     | APIErrorBody;
   if (!response.ok) {
+    if (response.status === 401 && typeof window !== "undefined" && window.location.pathname !== "/login") window.location.replace("/login");
     const error = "error" in payload ? payload.error : undefined;
     throw new ApiError(
       error?.message ?? `Request failed with status ${response.status}`,
@@ -54,30 +55,35 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (payload as APIEnvelope<T>).data;
 }
 
+const scoped = (path: string, organizationId?: string) => organizationId ? `${path}${path.includes("?") ? "&" : "?"}organizationId=${encodeURIComponent(organizationId)}` : path;
+
 const liveApi = {
   health: async (): Promise<HealthStatus> => {
     const response = await fetch(appConfig.healthPath, { cache: "no-store" });
     return (await response.json()) as HealthStatus;
   },
-  getSummary: () => request<ClusterSummary>(endpoints.summary),
-  getServers: () => request<Server[]>(endpoints.servers),
+  getSummary: (organizationId?: string) => request<ClusterSummary>(scoped(endpoints.summary, organizationId)),
+  getServers: (organizationId?: string) => request<Server[]>(scoped(endpoints.servers, organizationId)),
   getServer: (id: string) => request<Server>(endpoints.server(id)),
   setServerDrained: (id: string, drained: boolean) =>
     request<Server>(endpoints.drainServer(id), {
       method: "POST",
       body: JSON.stringify({ drained }),
     }),
-  getGPUs: () => request<GPUInventoryItem[]>(endpoints.gpus),
-  getContainers: (origin?: ContainerOrigin) =>
-    request<ContainerInventoryItem[]>(endpoints.containers(origin)),
+  getGPUs: (organizationId?: string) => request<GPUInventoryItem[]>(scoped(endpoints.gpus, organizationId)),
+  getContainers: (origin?: ContainerOrigin, organizationId?: string) =>
+    request<ContainerInventoryItem[]>(scoped(endpoints.containers(origin), organizationId)),
   getAllocationOptions: () => request<AllocationOptions>(endpoints.jobOptions),
-  previewJob: (input: CreateJobInput) => request<JobPreview>(endpoints.jobPreview, { method: "POST", body: JSON.stringify(input) }),
-  getJobs: () => request<Job[]>(endpoints.jobs),
+  previewJob: (input: CreateJobInput, signal?: AbortSignal) => request<JobPreview>(endpoints.jobPreview, { method: "POST", body: JSON.stringify(input), signal }),
+  getJobs: (organizationId?: string) => request<Job[]>(scoped(endpoints.jobs, organizationId)),
   getJob: (id: string) => request<Job>(endpoints.job(id)),
   createJob: (input: CreateJobInput) =>
     request<Job>(endpoints.jobs, { method: "POST", body: JSON.stringify(input) }),
   stopJob: (id: string) => request<Job>(endpoints.stopJob(id), { method: "POST" }),
-  getQueue: () => request<Job[]>(endpoints.queue),
+  continueJob: (id: string, input: { neededAt: string; ttlSeconds: number }) =>
+    request<Job>(endpoints.continueJob(id), { method: "POST", body: JSON.stringify(input) }),
+  artifactDownload: (id: string) => request<{ url: string; expiresInSeconds: number }>(endpoints.artifact(id)),
+  getQueue: (organizationId?: string) => request<Job[]>(scoped(endpoints.queue, organizationId)),
   runScheduler: () =>
     request<SchedulerResult>(endpoints.runScheduler, { method: "POST" }),
 };

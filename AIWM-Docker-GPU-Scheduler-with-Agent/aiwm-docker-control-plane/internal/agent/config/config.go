@@ -3,13 +3,17 @@ package config
 import (
 	"bufio"
 	"fmt"
-	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent"
 	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent"
 )
+
+// ReleaseControlPlaneURL được inject khi build; env luôn có quyền override.
+var ReleaseControlPlaneURL string
 
 type Config struct {
 	ControlPlaneURL  string
@@ -31,6 +35,12 @@ type Config struct {
 }
 
 func Load() (Config, error) {
+	return load(false)
+}
+
+func LoadForCheck() (Config, error) { return load(true) }
+
+func load(checkOnly bool) (Config, error) {
 	if err := loadDotEnv(".env.agent"); err != nil {
 		return Config{}, fmt.Errorf("load .env.agent: %w", err)
 	}
@@ -44,7 +54,7 @@ func Load() (Config, error) {
 	}
 	configuration := Config{
 		DockerEndpoint:  env("AIWM_DOCKER_ENDPOINT", "unix:///var/run/docker.sock"),
-		ControlPlaneURL: env("AIWM_CONTROL_PLANE_URL", "http://localhost:8080"),
+		ControlPlaneURL: env("AIWM_CONTROL_PLANE_URL", defaultControlPlaneURL()),
 		EnrollmentToken: env("AIWM_ENROLLMENT_TOKEN", ""),
 		MachineID:       machineID, Name: env("AIWM_AGENT_NAME", hostname),
 		Labels:    parseLabels(os.Getenv("AIWM_AGENT_LABELS")),
@@ -65,7 +75,7 @@ func Load() (Config, error) {
 	if configuration.RequestTimeout, err = duration("AIWM_AGENT_REQUEST_TIMEOUT", 30*time.Second); err != nil {
 		return Config{}, err
 	}
-	if configuration.MachineID == "" || configuration.Name == "" || configuration.EnrollmentToken == "" {
+	if configuration.MachineID == "" || configuration.Name == "" || (!checkOnly && configuration.EnrollmentToken == "") {
 		return Config{}, fmt.Errorf("agent machine ID, name and enrollment token must not be empty")
 	}
 	if configuration.HeartbeatEvery <= 0 || configuration.InventoryEvery <= 0 || configuration.CommandPollEvery <= 0 {
@@ -91,6 +101,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("request timeout must be positive")
 	}
 	return configuration, nil
+}
+
+func defaultControlPlaneURL() string {
+	if value := strings.TrimSpace(ReleaseControlPlaneURL); value != "" {
+		return value
+	}
+	return "http://localhost:8080"
 }
 
 func readMachineID() string {

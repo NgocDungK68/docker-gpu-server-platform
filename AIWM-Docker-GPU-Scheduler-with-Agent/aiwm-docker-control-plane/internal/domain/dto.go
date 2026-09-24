@@ -22,6 +22,7 @@ type CommandAckRequest struct {
 }
 
 type CreateJobRequest struct {
+	ResumeFromJobID string `json:"resumeFromJobId,omitempty"`
 	AllocationIntent
 	Name        string              `json:"name"`
 	Image       string              `json:"image"`

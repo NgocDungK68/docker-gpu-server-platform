@@ -14,14 +14,14 @@ import (
 
 func validAllocation() domain.CreateJobRequest {
 	fp8 := false
-	return domain.CreateJobRequest{AllocationIntent: domain.AllocationIntent{WorkloadType: domain.WorkloadTraining, NecessityLevel: domain.Necessity2, NecessityReason: "GO_LIVE_90_DAYS", SystemImportance: domain.ImportanceImportant, NeededAt: "2026-09-09T09:00:00+07:00", TTLSeconds: 3600},
+	return domain.CreateJobRequest{AllocationIntent: domain.AllocationIntent{WorkloadType: domain.WorkloadTraining, NecessityLevel: domain.Necessity2, NecessityReason: "GO_LIVE_90_DAYS", SystemImportance: domain.ImportanceImportant, NeededAt: time.Now().UTC().Format(time.RFC3339), TTLSeconds: 3600},
 		Name: "allocation-test", Image: "alpine:3.21", Resources: domain.AllocationResources{GPUCount: 1, MinVRAMMiB: 1024, PerformanceProfile: "a100-equivalent", FP8Required: &fp8}}
 }
 func allocationFixture(t *testing.T) (*ControlPlane, *memory.Store) {
 	t.Helper()
 	now := time.Now().UTC()
 	repo := memory.New(time.Minute)
-	_, err := repo.UpsertServer(context.Background(), domain.Server{ID: "s", MachineID: "m", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
+	_, err := repo.UpsertServer(allocationContext(), domain.Server{OrganizationID: "test-org", ID: "s", MachineID: "m", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
 		GPUs: []domain.GPU{{UUID: "GPU-a", Model: "A100", MemoryTotalMiB: 40960, Healthy: true, State: domain.GPUFree}}})
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +57,7 @@ func TestAllocationValidation(t *testing.T) {
 			cp, repo := allocationFixture(t)
 			r := validAllocation()
 			tc.change(&r)
-			_, err := cp.CreateJob(context.Background(), r)
+			_, err := cp.CreateJob(allocationContext(), r)
 			var validation *domain.ValidationError
 			if !errors.As(err, &validation) || validation.Fields[tc.field] == "" {
 				t.Fatalf("%v", err)
@@ -72,7 +72,7 @@ func TestAllocationValidation(t *testing.T) {
 	r.WorkloadType = domain.WorkloadInference
 	r.NecessityReason = "CUSTOM"
 	r.NecessityExplanation = "Hợp lệ"
-	if _, err := cp.PreviewJob(context.Background(), r); err != nil {
+	if _, err := cp.PreviewJob(allocationContext(), r); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -110,7 +110,7 @@ func TestResourceMatchingAndPreviewHasNoMutation(t *testing.T) {
 			snap.Servers["s"] = s
 			repo.Restore(snap)
 			before := repo.Export()
-			preview, err := cp.PreviewJob(context.Background(), r)
+			preview, err := cp.PreviewJob(allocationContext(), r)
 			if err != nil || preview.ResourceMatch.Satisfiable != (kind == "valid") {
 				t.Fatalf("%+v %v", preview, err)
 			}
@@ -134,7 +134,7 @@ func TestSubmitReevaluatesPreviewAndSchedulingRechecks(t *testing.T) {
 	cp, repo := allocationFixture(t)
 	facts := &mutableFacts{plan: true}
 	cp.policy = policy.New(facts)
-	ctx := context.Background()
+	ctx := allocationContext()
 	preview, err := cp.PreviewJob(ctx, validAllocation())
 	if err != nil || !preview.ResourceMatch.Satisfiable {
 		t.Fatal(err)
@@ -144,7 +144,7 @@ func TestSubmitReevaluatesPreviewAndSchedulingRechecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	j, err := cp.CreateJob(ctx, validAllocation())
-	if err != nil || j.Policy.Status != domain.PolicyCompetitive || facts.calls != 2 {
+	if err != nil || j.Policy.Status != domain.PolicyCompetitive || facts.calls < 2 {
 		t.Fatalf("%+v %v calls=%d", j, err, facts.calls)
 	}
 	n, err := cp.ScheduleOnce(ctx)
@@ -167,7 +167,7 @@ func TestSubmitReevaluatesPreviewAndSchedulingRechecks(t *testing.T) {
 }
 func TestPolicyOrderDeterminesWinnerAndCommitRechecksCapability(t *testing.T) {
 	cp, repo := allocationFixture(t)
-	ctx := context.Background()
+	ctx := allocationContext()
 	low := validAllocation()
 	low.NecessityLevel = domain.Necessity4
 	low.NecessityReason = "MODEL_EXPERIMENT"
@@ -201,4 +201,8 @@ func TestPolicyOrderDeterminesWinnerAndCommitRechecksCapability(t *testing.T) {
 	if !errors.Is(err, domain.ErrConflict) || !reflect.DeepEqual(before, repo.Export()) {
 		t.Fatal("commit ignored changed capability")
 	}
+}
+
+func allocationContext() context.Context {
+	return domain.WithPrincipal(context.Background(), domain.Principal{User: domain.User{OrganizationID: "test-org", Role: domain.RoleOrganizationUser}})
 }

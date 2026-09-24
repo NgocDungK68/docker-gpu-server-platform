@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "6ea5631b-114b-5944-a522-29b58466540d",
     "name": "AIWM - API audit và kiểm thử hệ thống hiện tại",
-    "description": "21 backend routes. Intent allocation có trong folder Allocation - Policy Preview Submit. CP dùng static public bearer; Agent dùng enrollment/agent credential riêng. Xem docs/API_TESTING_POSTMAN.md.",
+    "description": "Collection AIWM: dùng Organization - Luồng chính trước; login bằng account nội bộ để lấy access_token. Organization - Protocol nội bộ giữ fixture lifecycle/start failure với session/enrollment riêng. Các folders lịch sử yêu cầu login và tài nguyên demo thích hợp; không chạy cả collection một lượt. Không chứa credentials thật; không thực thi trong task implementation.",
     "schema": "https://schema.postman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -16,6 +16,1202 @@
     ]
   },
   "item": [
+    {
+      "name": "Organization - Luồng chính",
+      "description": "Gửi từng bước. Sau enrollment, start Agent Sim/thật theo TESTING_RUNBOOK trước khi submit. Không chạy toàn collection một lượt; stop chỉ Job vừa tạo. Login/current user dùng account nội bộ; ADMIN submit vẫn thuộc organization của account.",
+      "item": [
+        {
+          "name": "01 - Health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/healthz",
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "02 - Login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/login",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "const d=pm.response.json().data; pm.environment.set(\"access_token\",d.token); pm.environment.set(\"organization_id\",d.user.organizationId); pm.environment.set(\"current_role\",d.user.role);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "03 - Current user",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "const d=pm.response.json().data;pm.environment.set(\"organization_id\",d.user.organizationId);pm.environment.set(\"current_role\",d.user.role);pm.test(\"Không trả passwordHash\",()=>pm.expect(d.user).not.to.have.property(\"passwordHash\"));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "04 - Organizations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/organizations",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "if(pm.environment.get(\"current_role\")!==\"ADMIN\"){pm.test(\"Chỉ đơn vị hiện tại\",()=>pm.expect(pm.response.json().data.map(x=>x.id)).to.eql([pm.environment.get(\"organization_id\")]));}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "05 - Create enrollment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/enrollments",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Postman demo server\",\n  \"labels\": {\n    \"purpose\": \"demo\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\",()=>pm.response.to.have.status(201));",
+                  "if(pm.response.code===201){",
+                  "const d=pm.response.json().data;pm.environment.set(\"enrollment_id\",d.id);pm.environment.set(\"enrollment_token\",d.enrollmentToken);pm.environment.set(\"server_id\",d.serverId);pm.test(\"Enrollment thuộc account\",()=>pm.expect(d.organizationId).to.eql(pm.environment.get(\"organization_id\")));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "06 - Servers sau khi Agent register",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/servers",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "if(pm.environment.get(\"current_role\")!==\"ADMIN\"){for(const x of pm.response.json().data){pm.test(\"Đúng organization\",()=>pm.expect(x.organizationId).to.eql(pm.environment.get(\"organization_id\")));}}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "07 - GPUs tự discovery",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/gpus",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "if(pm.environment.get(\"current_role\")!==\"ADMIN\"){for(const x of pm.response.json().data){pm.test(\"Đúng organization\",()=>pm.expect(x.organizationId).to.eql(pm.environment.get(\"organization_id\")));}}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "08 - Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/system/summary",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "for(const k of [\"serversOffline\",\"gpusReserved\",\"gpusAllocated\",\"gpusUnhealthy\"]){pm.test(k,()=>pm.expect(pm.response.json().data[k]).to.be.a(\"number\"));}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "09 - Allocation options",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/options",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "10 - Preview không reserve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/preview",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"postman-organization-job\",\n  \"image\": \"{{job_image}}\",\n  \"backend\": \"DOCKER\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"resources\": {\n    \"gpuCount\": 1,\n    \"minVramMiB\": 1024,\n    \"performanceProfile\": \"general\",\n    \"fp8Required\": false,\n    \"allowSharedGpu\": false\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_2\",\n  \"necessityReason\": \"GO_LIVE_90_DAYS\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"{{needed_at}}\",\n  \"ttlSeconds\": 3600\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set(\"needed_at\",new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "11 - Submit Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"postman-organization-job\",\n  \"image\": \"{{job_image}}\",\n  \"backend\": \"DOCKER\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"resources\": {\n    \"gpuCount\": 1,\n    \"minVramMiB\": 1024,\n    \"performanceProfile\": \"general\",\n    \"fp8Required\": false,\n    \"allowSharedGpu\": false\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_2\",\n  \"necessityReason\": \"GO_LIVE_90_DAYS\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"{{needed_at}}\",\n  \"ttlSeconds\": 3600\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set(\"needed_at\",new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\",()=>pm.response.to.have.status(201));",
+                  "if(pm.response.code===201){",
+                  "pm.test(\"Job thuộc account\",()=>pm.expect(pm.response.json().data.organizationId).to.eql(pm.environment.get(\"organization_id\")));pm.environment.set(\"job_id\",pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "12 - Queue",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/queue",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "if(pm.environment.get(\"current_role\")!==\"ADMIN\"){for(const x of pm.response.json().data){pm.test(\"Đúng organization\",()=>pm.expect(x.organizationId).to.eql(pm.environment.get(\"organization_id\")));}}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "13 - Job và Assignment",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{job_id}}",
+            "description": "Gửi lại sau ticker/inventory; thiếu tài nguyên giữ QUEUED, không bắt buộc RUNNING ngay."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "pm.test(\"Job thuộc account\",()=>pm.expect(pm.response.json().data.organizationId).to.eql(pm.environment.get(\"organization_id\")));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "14 - Stop Job vừa tạo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{job_id}}/stop",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(!pm.environment.get(\"job_id\"))pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 202\",()=>pm.response.to.have.status(202));",
+                  "if(pm.response.code===202){",
+                  "pm.test(\"Job thuộc account\",()=>pm.expect(pm.response.json().data.organizationId).to.eql(pm.environment.get(\"organization_id\")));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "15 - Job terminal sau inventory",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{job_id}}",
+            "description": "Gửi khi inventory xác nhận terminal. Kiểm tra Assignment RELEASED nếu đã từng reserve; không giả định ACK là terminal."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "pm.test(\"Job thuộc account\",()=>pm.expect(pm.response.json().data.organizationId).to.eql(pm.environment.get(\"organization_id\")));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "16 - Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/logout",
+            "description": "Giữ token local để gửi request 17 chứng minh token bị thu hồi."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "pm.test(\"Đã thu hồi session\",()=>pm.expect(pm.response.json().data.loggedOut).to.eql(true));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "17 - Token đã logout không dùng lại",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 401\",()=>pm.response.to.have.status(401));",
+                  "if(pm.response.code===401){",
+                  "pm.environment.unset(\"access_token\");",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Organization - Quản trị ADMIN",
+      "description": "Login ADMIN trước. Điền metadata và mật khẩu mẫu trong environment local; không export secrets. Không tự khóa account đang dùng.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if(pm.environment.get(\"current_role\")!==\"ADMIN\")pm.execution.skipRequest();"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "01 - Danh sách organizations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/organizations",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "02 - Tạo organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/organizations",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{organization_code}}\",\n  \"name\": \"{{organization_name}}\",\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "pm.environment.set(\"managed_organization_id\",pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "03 - Sửa organization",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/organizations/{{managed_organization_id}}",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{organization_code}}\",\n  \"name\": \"{{organization_name}}\",\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "04 - Danh sách users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "for(const u of pm.response.json().data){pm.test(\"Không có hash\",()=>pm.expect(u).not.to.have.property(\"passwordHash\"));}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "05 - Tạo ORGANIZATION_USER",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{new_username}}\",\n  \"password\": \"{{new_password}}\",\n  \"role\": \"ORGANIZATION_USER\",\n  \"organizationId\": \"{{managed_organization_id}}\",\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "pm.environment.set(\"managed_user_id\",pm.response.json().data.id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "06 - Sửa user giữ mật khẩu",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users/{{managed_user_id}}",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{new_username}}\",\n  \"password\": \"\",\n  \"role\": \"ORGANIZATION_USER\",\n  \"organizationId\": \"{{managed_organization_id}}\",\n  \"enabled\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "07 - Enrollment cho organization được chọn",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/enrollments",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Postman selected unit server\",\n  \"organizationId\": \"{{managed_organization_id}}\",\n  \"labels\": {\n    \"purpose\": \"demo\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\",()=>pm.response.to.have.status(201));",
+                  "if(pm.response.code===201){",
+                  "const d=pm.response.json().data;pm.environment.set(\"enrollment_id\",d.id);pm.environment.set(\"enrollment_token\",d.enrollmentToken);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "08 - Servers theo organization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/servers?organizationId={{managed_organization_id}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "for(const x of pm.response.json().data){pm.test(\"Đúng bộ lọc\",()=>pm.expect(x.organizationId).to.eql(pm.environment.get(\"managed_organization_id\")));}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "09 - Thu hồi enrollment vừa tạo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/enrollments/{{enrollment_id}}/revoke",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "pm.expect(pm.response.json().data.revoked).to.eql(true);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Organization - Kiểm tra tenancy",
+      "description": "Login ORGANIZATION_USER. Các ID other_* phải thuộc một đơn vị khác, lấy từ ADMIN trong môi trường demo; không dùng server/job production.",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "if(pm.environment.get(\"current_role\")!==\"ORGANIZATION_USER\")pm.execution.skipRequest();"
+            ]
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "01 - Không query organization tùy ý",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/servers?organizationId={{organization_id}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\",()=>pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "02 - Không truyền organization vào enrollment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/enrollments",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Không được tạo\",\n  \"organizationId\": \"{{organization_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\",()=>pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "03 - Không truyền organization vào Job",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"postman-organization-job\",\n  \"image\": \"{{job_image}}\",\n  \"backend\": \"DOCKER\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"resources\": {\n    \"gpuCount\": 1,\n    \"minVramMiB\": 1024,\n    \"performanceProfile\": \"general\",\n    \"fp8Required\": false,\n    \"allowSharedGpu\": false\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_2\",\n  \"necessityReason\": \"GO_LIVE_90_DAYS\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"{{needed_at}}\",\n  \"ttlSeconds\": 3600,\n  \"organizationId\": \"{{organization_id}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set(\"needed_at\",new Date().toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\",()=>pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "04 - Không quản lý users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/users",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\",()=>pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "05 - Không chạy scheduler thủ công",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/scheduler/run-once",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 403\",()=>pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "06 - Không đọc Server khác đơn vị",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/servers/{{other_server_id}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(!pm.environment.get(\"other_server_id\"))pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\",()=>pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "07 - Không đọc Job khác đơn vị",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{other_job_id}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(!pm.environment.get(\"other_job_id\"))pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\",()=>pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "08 - Không stop Job khác đơn vị",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{other_job_id}}/stop",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(!pm.environment.get(\"other_job_id\"))pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\",()=>pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "response": []
+        }
+      ]
+    },
     {
       "name": "00 - Health",
       "description": "Chạy đầu tiên. CP không cần Agent/GPU để trả health/readiness.",
@@ -959,6 +2155,15 @@
           "response": [],
           "event": [
             {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(pm.environment.get(\"current_role\")!==\"ADMIN\")pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
               "listen": "test",
               "script": {
                 "type": "text/javascript",
@@ -974,9 +2179,115 @@
       ]
     },
     {
-      "name": "08 - Agent Internal APIs",
-      "description": "INTERNAL. Mặc định skip. Chỉ CP riêng tại internal_base_url, bật enable_agent_internal=true, nhập enrollment_token. Fixture HTTP không chạy Docker/NVML. Identity/commands ở đây tách khỏi demo.",
+      "name": "Organization - Protocol nội bộ",
+      "description": "CP kiểm thử riêng, ADMIN nội bộ và enable_agent_internal=true. Đây là protocol fixture; không thực thi Docker/NVML thật. Chạy liên tục để inventory fresh, dùng Agent Sim cho E2E thực. Không dùng identity của Agent đang chạy.",
       "item": [
+        {
+          "name": "Internal 00a - Login ADMIN trên CP fixture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{internal_base_url}}/api/v1/auth/login",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{internal_username}}\",\n  \"password\": \"{{internal_password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\",()=>pm.response.to.have.status(200));",
+                  "if(pm.response.code===200){",
+                  "const d=pm.response.json().data;pm.test(\"Fixture cần ADMIN\",()=>pm.expect(d.user.role).to.eql(\"ADMIN\"));if(d.user.role===\"ADMIN\"){pm.environment.set(\"internal_access_token\",d.token);pm.environment.set(\"internal_organization_id\",d.user.organizationId);}else{pm.environment.unset(\"internal_access_token\");}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "Internal 00b - Enrollment mới cho fixture",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Accept",
+                "value": "application/json"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{internal_base_url}}/api/v1/enrollments",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"displayName\": \"Postman protocol fixture\",\n  \"labels\": {\n    \"purpose\": \"protocol-test\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{internal_access_token}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(!pm.environment.get(\"internal_access_token\"))pm.execution.skipRequest();"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\",()=>pm.response.to.have.status(201));",
+                  "if(pm.response.code===201){",
+                  "const d=pm.response.json().data;pm.environment.set(\"enrollment_token\",d.enrollmentToken);pm.environment.set(\"internal_enrollment_id\",d.id);pm.environment.set(\"manual_machine_id\",\"postman-manual-\"+pm.variables.replaceIn(\"{{$guid}}\"));pm.environment.set(\"inventory_sequence\",\"0\");",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
         {
           "name": "Internal 01 - Register Agent riêng",
           "id": "17c30cb8-1302-56c6-88fa-deac3382b415",
@@ -1180,7 +2491,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -1223,14 +2534,14 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"postman-manual-job\",\n  \"image\": \"{{job_image}}\",\n  \"backend\": \"DOCKER\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"environment\": {\n    \"POSTMAN_DEMO\": \"not-a-secret\"\n  },\n  \"resources\": {\n    \"gpuCount\": 1,\n    \"minVramMiB\": 1024,\n    \"allowSharedGpu\": false,\n    \"performanceProfile\": \"a100-equivalent\",\n    \"fp8Required\": false\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_2\",\n  \"necessityReason\": \"GO_LIVE_90_DAYS\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"2026-09-09T09:00:00+07:00\",\n  \"ttlSeconds\": 3600\n}",
+              "raw": "{\n  \"name\": \"postman-manual-job\",\n  \"image\": \"{{job_image}}\",\n  \"backend\": \"DOCKER\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"environment\": {\n    \"POSTMAN_DEMO\": \"not-a-secret\"\n  },\n  \"resources\": {\n    \"gpuCount\": 1,\n    \"minVramMiB\": 1024,\n    \"allowSharedGpu\": false,\n    \"performanceProfile\": \"a100-equivalent\",\n    \"fp8Required\": false\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_2\",\n  \"necessityReason\": \"GO_LIVE_90_DAYS\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"{{needed_at}}\",\n  \"ttlSeconds\": 3600\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1240,6 +2551,15 @@
           },
           "response": [],
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set(\"needed_at\",new Date().toISOString());"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -1271,7 +2591,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -1402,7 +2722,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -1503,7 +2823,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -1542,7 +2862,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -1673,7 +2993,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -1774,7 +3094,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -1973,7 +3293,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -2025,7 +3345,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -2077,14 +3397,14 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
             },
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"postman-manual-job\",\n  \"image\": \"{{job_image}}\",\n  \"backend\": \"DOCKER\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"environment\": {\n    \"POSTMAN_DEMO\": \"not-a-secret\"\n  },\n  \"resources\": {\n    \"gpuCount\": 1,\n    \"minVramMiB\": 1024,\n    \"allowSharedGpu\": false,\n    \"performanceProfile\": \"a100-equivalent\",\n    \"fp8Required\": false\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_2\",\n  \"necessityReason\": \"GO_LIVE_90_DAYS\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"2026-09-09T09:00:00+07:00\",\n  \"ttlSeconds\": 3600\n}",
+              "raw": "{\n  \"name\": \"postman-manual-job\",\n  \"image\": \"{{job_image}}\",\n  \"backend\": \"DOCKER\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"environment\": {\n    \"POSTMAN_DEMO\": \"not-a-secret\"\n  },\n  \"resources\": {\n    \"gpuCount\": 1,\n    \"minVramMiB\": 1024,\n    \"allowSharedGpu\": false,\n    \"performanceProfile\": \"a100-equivalent\",\n    \"fp8Required\": false\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_2\",\n  \"necessityReason\": \"GO_LIVE_90_DAYS\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"{{needed_at}}\",\n  \"ttlSeconds\": 3600\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2094,6 +3414,15 @@
           },
           "response": [],
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.environment.set(\"needed_at\",new Date().toISOString());"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -2125,7 +3454,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -2256,7 +3585,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -2295,7 +3624,7 @@
               "bearer": [
                 {
                   "key": "token",
-                  "value": "{{access_token}}",
+                  "value": "{{internal_access_token}}",
                   "type": "string"
                 }
               ]
@@ -2327,9 +3656,7 @@
               "else {",
               " const a=(pm.environment.get(\"internal_base_url\")||\"\").replace(/\\/$/,\"\");",
               " const b=(pm.environment.get(\"base_url\")||\"\").replace(/\\/$/,\"\");",
-              " if(!a || a===b || !pm.environment.get(\"enrollment_token\")){",
-              "   pm.execution.skipRequest(); throw new Error(\"Cần CP test riêng và enrollment_token; xem docs/API_TESTING_POSTMAN.md\");",
-              " }",
+              " if(!a || a===b){pm.execution.skipRequest();throw new Error(\"Cần Control Plane kiểm thử riêng\");}",
               "}"
             ]
           }
@@ -2574,6 +3901,15 @@
           },
           "response": [],
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(pm.environment.get(\"current_role\")!==\"ADMIN\")pm.execution.skipRequest();"
+                ]
+              }
+            },
             {
               "listen": "prerequest",
               "script": {
@@ -3174,6 +4510,15 @@
           },
           "response": [],
           "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if(pm.environment.get(\"current_role\")!==\"ADMIN\")pm.execution.skipRequest();"
+                ]
+              }
+            },
             {
               "listen": "test",
               "script": {
@@ -3980,6 +5325,396 @@
               }
             }
           ]
+        }
+      ]
+    },
+    {
+      "name": "Planning - Lịch tương lai và Policy",
+      "description": "Login VTT bằng folder Organization trước. Cần vtt-gpu-01 fresh với 3 H100 FREE; không tự dừng workload khác. Chạy 01–10 trong vòng 3 phút. 11 kiểm runtime sau start; 12–14 chỉ cleanup Job của scenario. Không chạy whole collection.",
+      "item": [
+        {
+          "name": "01 - Current user / Organization",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200',()=>pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set('planning_org',pm.response.json().data.user.organizationId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02 - A N2 future interval",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"02 - A N2 future interval\",\n  \"image\": \"alpine:3.21\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"resources\": {\n    \"gpuCount\": 3,\n    \"minVramMiB\": 65536,\n    \"performanceProfile\": \"h100-equivalent\",\n    \"fp8Required\": true\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_2\",\n  \"necessityReason\": \"CUSTOM\",\n  \"necessityExplanation\": \"Demo tranh lịch cùng interval\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"{{planning_start}}\",\n  \"ttlSeconds\": 60\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('planning_start',new Date(Date.now()+180000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Created',()=>pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('planning_a',pm.response.json().data.id);",
+                  "pm.test('Chưa chạy',()=>pm.expect(pm.response.json().data.status).to.eql('QUEUED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 - Đợi planning tick (3 giây)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_a}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(function () {}, 3000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 - A đã reserve, chưa START",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_a}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j=pm.response.json().data;",
+                  "pm.test('Future PLANNED',()=>{pm.expect(j.status).to.eql('ASSIGNED');pm.expect(j.assignment.reservationState).to.eql('PLANNED');pm.expect(j.assignment.commandId).to.eql('');pm.expect(new Date(j.assignment.startAt).getTime()).to.be.above(Date.now());});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05 - C overlap priority thấp N3",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"05 - C overlap priority thấp N3\",\n  \"image\": \"alpine:3.21\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"resources\": {\n    \"gpuCount\": 3,\n    \"minVramMiB\": 65536,\n    \"performanceProfile\": \"h100-equivalent\",\n    \"fp8Required\": true\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_3\",\n  \"necessityReason\": \"CUSTOM\",\n  \"necessityExplanation\": \"Demo tranh lịch cùng interval\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"{{planning_start}}\",\n  \"ttlSeconds\": 60\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Created',()=>pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('planning_c',pm.response.json().data.id);",
+                  "pm.test('Chưa chạy',()=>pm.expect(pm.response.json().data.status).to.eql('QUEUED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06 - B overlap priority cao N1",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"06 - B overlap priority cao N1\",\n  \"image\": \"alpine:3.21\",\n  \"command\": [\n    \"sh\",\n    \"-c\",\n    \"sleep 300\"\n  ],\n  \"resources\": {\n    \"gpuCount\": 3,\n    \"minVramMiB\": 65536,\n    \"performanceProfile\": \"h100-equivalent\",\n    \"fp8Required\": true\n  },\n  \"workloadType\": \"TRAINING\",\n  \"necessityLevel\": \"NECESSITY_1\",\n  \"necessityReason\": \"CUSTOM\",\n  \"necessityExplanation\": \"Demo tranh lịch cùng interval\",\n  \"systemImportance\": \"IMPORTANT\",\n  \"neededAt\": \"{{planning_start}}\",\n  \"ttlSeconds\": 60\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Created',()=>pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('planning_b',pm.response.json().data.id);",
+                  "pm.test('Chưa chạy',()=>pm.expect(pm.response.json().data.status).to.eql('QUEUED'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07 - Đợi replan tick (3 giây)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_b}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(function () {}, 3000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "08 - B thắng Policy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_b}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const j=pm.response.json().data;",
+                  "pm.test('N1 giữ lịch, chưa chạy',()=>{pm.expect(j.status).to.eql('ASSIGNED');pm.expect(j.assignment.commandId).to.eql('');pm.expect(j.organizationId).to.eql(pm.collectionVariables.get('planning_org'));});",
+                  "pm.collectionVariables.set('planning_server',j.assignment.serverId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "09 - A về QUEUED",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_a}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('N2 chờ',()=>{const j=pm.response.json().data;pm.expect(j.status).to.eql('QUEUED');pm.expect(j.assignment).to.be.undefined;});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "10 - Ownership của server được chọn",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/servers/{{planning_server}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Cùng Organization',()=>pm.expect(pm.response.json().data.organizationId).to.eql(pm.collectionVariables.get('planning_org')));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "11 - Sau start hoặc end: inspect B",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_b}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('HTTP 200',()=>pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "12 - Cleanup A",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_a}}/stop",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "13 - Cleanup B",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_b}}/stop",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "14 - Cleanup C",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/api/v1/jobs/{{planning_c}}/stop",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
         }
       ]
     }

@@ -1,15 +1,12 @@
 openapi: 3.1.0
 info:
   title: AIWM Docker GPU Control Plane API
-  version: 0.4.0
-  description: 'Brownfield-safe control plane for standalone Docker GPU servers. Agent APIs
-
-    are machine-to-machine; resource and job APIs are consumed by the web app.
-
-    '
+  version: 0.5.0
+  description: "Control Plane cho Docker GPU server độc lập. Public API dùng session nội bộ; Agent dùng enrollment và Agent token. Ownership được backend xác thực."
 servers:
 - url: http://localhost:8080
 tags:
+- name: Identity
 - name: System
 - name: Agents
 - name: Inventory
@@ -32,10 +29,16 @@ paths:
       operationId: ready
       responses:
         '200':
-          description: Process can serve traffic
+          description: Process có thể nhận HTTP; handler không probe PostgreSQL/Agent/GPU
       security: []
   /api/v1/system/summary:
     get:
+      parameters:
+      - in: query
+        name: organizationId
+        description: "Chỉ ADMIN được lọc organization; non-admin gửi giá trị bị 403. Không quyết định organization của Job submit."
+        schema:
+          type: string
       tags:
       - System
       operationId: getClusterSummary
@@ -64,6 +67,7 @@ paths:
       tags:
       - Agents
       operationId: registerAgent
+      description: Enrollment resolve Server/Organization server-side; name/labels authoritative từ enrollment. Re-register cùng machine xoay Agent token và đợi FULL inventory.
       parameters:
       - in: header
         name: X-Enrollment-Token
@@ -223,6 +227,12 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/servers:
     get:
+      parameters:
+      - in: query
+        name: organizationId
+        description: "Chỉ ADMIN được lọc organization; non-admin gửi giá trị bị 403. Không quyết định organization của Job submit."
+        schema:
+          type: string
       tags:
       - Inventory
       operationId: listServers
@@ -317,6 +327,12 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/gpus:
     get:
+      parameters:
+      - in: query
+        name: organizationId
+        description: "Chỉ ADMIN được lọc organization; non-admin gửi giá trị bị 403. Không quyết định organization của Job submit."
+        schema:
+          type: string
       tags:
       - Inventory
       operationId: listGPUs
@@ -344,6 +360,12 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/containers:
     get:
+      parameters:
+      - in: query
+        name: organizationId
+        description: "Chỉ ADMIN được lọc organization; non-admin gửi giá trị bị 403. Không quyết định organization của Job submit."
+        schema:
+          type: string
       tags:
       - Inventory
       operationId: listContainers
@@ -380,6 +402,12 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/jobs:
     get:
+      parameters:
+      - in: query
+        name: organizationId
+        description: "Chỉ ADMIN được lọc organization; non-admin gửi giá trị bị 403. Không quyết định organization của Job submit."
+        schema:
+          type: string
       tags:
       - Jobs
       operationId: listJobs
@@ -500,8 +528,129 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+  /api/v1/jobs/{jobID}/continue:
+    post:
+      tags: [Jobs]
+      operationId: continueTraining
+      summary: Xin cấp phát mới từ checkpoint của Training đã hết thời gian
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [neededAt, ttlSeconds]
+              properties:
+                neededAt: {type: string, format: date-time}
+                ttlSeconds: {type: integer, minimum: 1}
+      responses:
+        '201':
+          description: Job QUEUED mới; policy/calendar xử lý như mọi request mới
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/Job'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: Không tìm thấy hoặc khác organization}
+        '409': {description: Job chưa đủ điều kiện tiếp tục hoặc storage chưa bật}
+  /api/v1/jobs/{jobID}/artifact:
+    get:
+      tags: [Jobs]
+      operationId: downloadTrainingArtifact
+      summary: Lấy URL tải final artifact; cùng organization hoặc ADMIN
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      responses:
+        '200':
+          description: URL có chữ ký, không chứa S3 secret; hiệu lực 300 giây
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      url: {type: string, format: uri}
+                      expiresInSeconds: {type: integer, const: 300}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '404': {description: Không tìm thấy hoặc khác organization}
+        '409': {description: Artifact chưa READY}
+  /api/v1/training/{jobID}:
+    get:
+      tags: [Training]
+      operationId: getTrainingContract
+      summary: Contract cho ứng dụng training; không dùng session user hoặc Agent token
+      security:
+      - TrainingJobToken: []
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      responses:
+        '200':
+          description: Poll để nhận cảnh báo/checkpoint request hoặc URL resume đã xác thực
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      jobId: {type: string}
+                      endAt: {type: string, format: date-time}
+                      checkpointRequested: {type: boolean}
+                      stopRequested: {type: boolean}
+                      training: {$ref: '#/components/schemas/TrainingState'}
+                      resumeURL: {type: string, format: uri}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+  /api/v1/training/{jobID}/{kind}:
+    put:
+      tags: [Training]
+      operationId: uploadTrainingOutput
+      summary: Stream checkpoint hoặc artifact; READY chỉ sau khi object storage lưu thành công
+      security:
+      - TrainingJobToken: []
+      parameters:
+      - $ref: '#/components/parameters/JobID'
+      - in: path
+        name: kind
+        required: true
+        schema: {type: string, enum: [checkpoint, artifact]}
+      - in: query
+        name: step
+        schema: {type: integer, minimum: 0, default: 0}
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: {type: string, format: binary}
+      responses:
+        '200':
+          description: Metadata đã được commit; yêu cầu Content-Length, giới hạn từ typed config
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {$ref: '#/components/schemas/TrainingState'}
+        '400': {description: kind hoặc step không hợp lệ}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '409': {description: Upload đang chạy hoặc final artifact đã READY}
+        '413': {description: Thiếu Content-Length hoặc vượt giới hạn}
+        '500': {description: Upload hoặc commit metadata thất bại}
   /api/v1/queue:
     get:
+      parameters:
+      - in: query
+        name: organizationId
+        description: "Chỉ ADMIN được lọc organization; non-admin gửi giá trị bị 403. Không quyết định organization của Job submit."
+        schema:
+          type: string
       tags:
       - Jobs
       operationId: getQueue
@@ -533,6 +682,7 @@ paths:
       tags:
       - Scheduler
       operationId: runSchedulerOnce
+      description: Chỉ ADMIN; organization ownership là hard constraint trước resource filter và strategy.
       responses:
         '200':
           description: One scheduling cycle completed
@@ -616,8 +766,682 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateJobRequest'
+  /api/v1/auth/login:
+    post:
+      tags:
+        - "Identity"
+      operationId: "login"
+      description: "Đăng nhập nội bộ; không public registration. Rate limit 20 lần/phút/peer IP và 4 hash đồng thời."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    $ref: "#/components/schemas/LoginResult"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "Vượt giới hạn login"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      security: []
+  /api/v1/auth/me:
+    get:
+      tags:
+        - "Identity"
+      operationId: "currentUser"
+      description: "Account và organization từ session hiện tại."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Principal"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/auth/logout:
+    post:
+      tags:
+        - "Identity"
+      operationId: "logout"
+      description: "Thu hồi session hiện tại."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    type: "object"
+                    properties:
+                      loggedOut:
+                        type: "boolean"
+                    required:
+                      - "loggedOut"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /api/v1/organizations:
+    get:
+      parameters:
+      - in: query
+        name: organizationId
+        description: "Chỉ ADMIN được lọc organization; non-admin gửi giá trị bị 403. Không quyết định organization của Job submit."
+        schema:
+          type: string
+      tags:
+        - "Identity"
+      operationId: "listOrganizations"
+      description: "ADMIN xem nhiều organization; ORGANIZATION_USER chỉ thấy đơn vị của mình."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/Organization"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags:
+        - "Identity"
+      operationId: "createOrganization"
+      description: "Chỉ ADMIN; code unique; tạo trả 200."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Organization"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationInput"
+  /api/v1/organizations/{organizationID}:
+    post:
+      tags:
+        - "Identity"
+      operationId: "updateOrganization"
+      description: "Chỉ ADMIN; không chuyển ownership runtime."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    $ref: "#/components/schemas/Organization"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OrganizationInput"
+      parameters:
+        - {"in": "path", "name": "organizationID", "required": true, "schema": {"type": "string"}}
+  /api/v1/users:
+    get:
+      tags:
+        - "Identity"
+      operationId: "listUsers"
+      description: "Chỉ ADMIN; không serialize passwordHash."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/User"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags:
+        - "Identity"
+      operationId: "createUser"
+      description: "Chỉ ADMIN cấp account nội bộ; tạo trả 200."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    $ref: "#/components/schemas/User"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserInput"
+  /api/v1/users/{userID}:
+    post:
+      tags:
+        - "Identity"
+      operationId: "updateUser"
+      description: "Chỉ ADMIN; organization bất biến; thu hồi session của user được sửa."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    $ref: "#/components/schemas/User"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserInput"
+      parameters:
+        - {"in": "path", "name": "userID", "required": true, "schema": {"type": "string"}}
+  /api/v1/enrollments:
+    get:
+      parameters:
+      - in: query
+        name: organizationId
+        description: "Chỉ ADMIN được lọc organization; non-admin gửi giá trị bị 403. Không quyết định organization của Job submit."
+        schema:
+          type: string
+      tags:
+        - "Identity"
+      operationId: "listEnrollments"
+      description: "Theo organization context; không trả token/hash."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    type: "array"
+                    items:
+                      $ref: "#/components/schemas/Enrollment"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      tags:
+        - "Identity"
+      operationId: "createEnrollment"
+      description: "Bind organization từ identity, hoặc ADMIN chọn organization. GPU do Agent discover."
+      responses:
+        "201":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    $ref: "#/components/schemas/EnrollmentResult"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnrollmentInput"
+  /api/v1/enrollments/{enrollmentID}/revoke:
+    post:
+      tags:
+        - "Identity"
+      operationId: "revokeEnrollment"
+      description: "Trong organization context; chặn register lại, không thu hồi Agent token đã cấp hay dừng container."
+      responses:
+        "200":
+          description: "Thành công"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  data:
+                    type: "object"
+                    properties:
+                      revoked:
+                        type: "boolean"
+                    required:
+                      - "revoked"
+                required:
+                  - "data"
+        "400":
+          description: "DTO không hợp lệ"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "Không đủ quyền"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "Không tìm thấy hoặc ngoài phạm vi organization"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "Xung đột metadata/ownership"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "default":
+          description: "Lỗi có cấu trúc"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+      parameters:
+        - {"in": "path", "name": "enrollmentID", "required": true, "schema": {"type": "string"}}
 components:
   securitySchemes:
+    TrainingJobToken:
+      type: http
+      scheme: bearer
+      description: Token riêng từng Job được inject vào container; không cấp quyền API người dùng.
     agentBearer:
       type: http
       scheme: bearer
@@ -625,7 +1449,7 @@ components:
     publicBearer:
       type: http
       scheme: bearer
-      bearerFormat: operator-api-token
+      bearerFormat: opaque-session-token
   parameters:
     AgentID:
       in: path
@@ -659,6 +1483,197 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
   schemas:
+    Organization:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        code:
+          type: "string"
+        name:
+          type: "string"
+        enabled:
+          type: "boolean"
+        createdAt:
+          type: "string"
+          format: "date-time"
+        updatedAt:
+          type: "string"
+          format: "date-time"
+      required:
+        - "id"
+        - "code"
+        - "name"
+        - "enabled"
+        - "createdAt"
+        - "updatedAt"
+    User:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        username:
+          type: "string"
+        role:
+          type: "string"
+          enum:
+            - "ADMIN"
+            - "ORGANIZATION_USER"
+        organizationId:
+          type: "string"
+        enabled:
+          type: "boolean"
+      required:
+        - "id"
+        - "username"
+        - "role"
+        - "organizationId"
+        - "enabled"
+    Principal:
+      type: "object"
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        organization:
+          $ref: "#/components/schemas/Organization"
+      required:
+        - "user"
+        - "organization"
+    LoginRequest:
+      type: "object"
+      properties:
+        username:
+          type: "string"
+          maxLength: 200
+        password:
+          type: "string"
+          format: "password"
+          writeOnly: true
+          maxLength: 256
+      required:
+        - "username"
+        - "password"
+      additionalProperties: false
+    LoginResult:
+      type: "object"
+      properties:
+        token:
+          type: "string"
+          description: "Session opaque, TTL 8 giờ; chỉ lưu hash tại PostgreSQL."
+        expiresAt:
+          type: "string"
+          format: "date-time"
+        user:
+          $ref: "#/components/schemas/User"
+        organization:
+          $ref: "#/components/schemas/Organization"
+      required:
+        - "token"
+        - "expiresAt"
+        - "user"
+        - "organization"
+    OrganizationInput:
+      type: "object"
+      properties:
+        code:
+          type: "string"
+          minLength: 1
+          maxLength: 32
+        name:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        enabled:
+          type: "boolean"
+      required:
+        - "code"
+        - "name"
+      additionalProperties: false
+    UserInput:
+      type: "object"
+      properties:
+        username:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        password:
+          type: "string"
+          format: "password"
+          writeOnly: true
+          maxLength: 256
+          description: "Tạo user: 12–256 byte; sửa user: bỏ trống để giữ mật khẩu. Sửa user thu hồi các session."
+        role:
+          type: "string"
+          enum:
+            - "ADMIN"
+            - "ORGANIZATION_USER"
+        organizationId:
+          type: "string"
+          description: "Organization bất biến khi sửa User."
+        enabled:
+          type: "boolean"
+      required:
+        - "username"
+        - "role"
+        - "organizationId"
+      additionalProperties: false
+    EnrollmentInput:
+      type: "object"
+      properties:
+        displayName:
+          type: "string"
+          minLength: 1
+          maxLength: 200
+        labels:
+          type: "object"
+          maxProperties: 32
+          additionalProperties:
+            type: "string"
+            maxLength: 256
+          propertyNames:
+            minLength: 1
+            maxLength: 64
+        organizationId:
+          type: "string"
+          description: "Chỉ ADMIN được gửi; nếu bỏ qua dùng organization của account. ORGANIZATION_USER gửi field có giá trị bị 403."
+      required:
+        - "displayName"
+      additionalProperties: false
+    Enrollment:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        organizationId:
+          type: "string"
+        serverId:
+          type: "string"
+        displayName:
+          type: "string"
+        labels:
+          type:
+            - "object"
+            - "null"
+          additionalProperties:
+            type: "string"
+        expiresAt:
+          type: "string"
+          format: "date-time"
+        machineId:
+          type: "string"
+        revoked:
+          type: "boolean"
+      required:
+        - "id"
+        - "organizationId"
+        - "serverId"
+        - "displayName"
+        - "expiresAt"
+        - "revoked"
+    EnrollmentResult:
+      allOf:
+        - {"$ref": "#/components/schemas/Enrollment"}
+        - {"type": "object", "properties": {"enrollmentToken": {"type": "string", "description": "Secret chỉ trả khi tạo; lần bind đầu trong 24 giờ; sau bind chỉ cùng machineId được register lại."}}, "required": ["enrollmentToken"]}
     RegisterAgentRequest:
       type: object
       required:
@@ -891,6 +1906,24 @@ components:
         graceSeconds:
           type: integer
           minimum: 0
+    TrainingState:
+      type: object
+      description: Metadata riêng với JobStatus; snapshot cũ có thể có status rỗng. Không chứa binary/token/lease.
+      properties:
+        checkpointStatus:
+          type: string
+          enum: [NONE, REQUESTED, SAVING, AVAILABLE, FAILED, '']
+        latestCheckpointURI: {type: string}
+        checkpointCreatedAt: {type: string, format: date-time}
+        checkpointStep: {type: integer, minimum: 0}
+        checkpointWarningAt: {type: string, format: date-time}
+        artifactStatus:
+          type: string
+          enum: [NONE, SAVING, READY, FAILED, '']
+        finalArtifactURI: {type: string}
+        artifactCreatedAt: {type: string, format: date-time}
+        resumeCheckpointURI: {type: string}
+        resumeFromJobId: {type: string}
     CreateJobRequest:
       type: object
       required:
@@ -904,6 +1937,9 @@ components:
       - neededAt
       - ttlSeconds
       properties:
+        resumeFromJobId:
+          type: string
+          description: Backend lấy URI từ Job nguồn cùng organization; không nhận URI do client tự nhập.
         name:
           type: string
           minLength: 3
@@ -954,11 +1990,11 @@ components:
         neededAt:
           type: string
           format: date-time
-          description: RFC3339 có timezone, normalize UTC; cho phép quá khứ. Nhu cầu mong muốn, chưa là lịch start.
+          description: RFC3339 có timezone; start cố định, chuẩn hóa UTC. Chỉ chấp nhận quá khứ trong tolerance 60 giây và interval chưa kết thúc.
         ttlSeconds:
           type: integer
           minimum: 1
-          description: Thời lượng đăng ký, đơn vị giây. Maximum từ jobs/options (mặc định 2592000); chưa tự stop/reclaim.
+          description: Thời lượng cấp GPU tính từ neededAt, đơn vị giây; end loại trừ. Maximum từ jobs/options (mặc định 2592000). Hết hạn gửi STOP, release sau inventory xác nhận.
       additionalProperties: false
       description: Intent-based request; backend đánh giá lại policy và snapshot rồi tạo QUEUED. Scheduler cycle
         re-evaluate trước atomic reservation.
@@ -1031,7 +2067,7 @@ components:
           const: false
         performanceProfile:
           type: string
-          description: ID từ backend capability catalog tại jobs/options.
+          description: AUTO hoặc HIGH_PERFORMANCE từ jobs/options. Các ID general/a100-equivalent/h100-equivalent chỉ giữ tương thích client cũ.
         fp8Required:
           type: boolean
       additionalProperties: false
@@ -1055,6 +2091,12 @@ components:
     Assignment:
       type: object
       properties:
+        startAt:
+          type: string
+          format: date-time
+        endAt:
+          type: string
+          format: date-time
         serverId:
           type: string
         gpuUuids:
@@ -1069,6 +2111,7 @@ components:
         reservationState:
           type: string
           enum:
+          - PLANNED
           - RESERVED
           - ALLOCATED
           - RELEASED
@@ -1082,6 +2125,8 @@ components:
         reason:
           type: string
       required:
+      - startAt
+      - endAt
       - serverId
       - gpuUuids
       - commandId
@@ -1093,6 +2138,21 @@ components:
     Job:
       type: object
       properties:
+        training:
+          $ref: '#/components/schemas/TrainingState'
+        resumable: {type: boolean}
+        terminationReason:
+          type: string
+          enum: [COMPLETED, TIME_LIMIT, USER_CANCELLED, EXECUTION_ERROR, SYSTEM_ERROR]
+        requestedStartAt:
+          type: string
+          format: date-time
+        requestedEndAt:
+          type: string
+          format: date-time
+        organizationId:
+          type: string
+          description: "Ownership do backend xác định; GPU suy ra từ Server."
         name:
           type: string
           minLength: 3
@@ -1187,12 +2247,12 @@ components:
           description: ' Job cũ trước intent có thể mang zero value.'
         neededAt:
           type: string
-          description: RFC3339 có timezone, normalize UTC; cho phép quá khứ. Nhu cầu mong muốn, chưa là lịch start.
+          description: RFC3339 có timezone; start cố định, chuẩn hóa UTC. Chỉ chấp nhận quá khứ trong tolerance 60 giây và interval chưa kết thúc.
             Job cũ trước intent có thể mang zero value.
         ttlSeconds:
           type: integer
           minimum: 0
-          description: Thời lượng đăng ký, đơn vị giây. Maximum từ jobs/options (mặc định 2592000); chưa tự stop/reclaim.
+          description: Thời lượng cấp GPU tính từ neededAt, đơn vị giây; end loại trừ. Maximum từ jobs/options (mặc định 2592000). Hết hạn gửi STOP, release sau inventory xác nhận.
             Job cũ trước intent có thể mang zero value.
         necessityLabel:
           type: string
@@ -1215,6 +2275,9 @@ components:
     Server:
       type: object
       properties:
+        organizationId:
+          type: string
+          description: "Ownership do backend xác định; GPU suy ra từ Server."
         id:
           type: string
         machineId:
@@ -1280,6 +2343,14 @@ components:
     ClusterSummary:
       type: object
       properties:
+        serversOffline:
+          type: "integer"
+        gpusReserved:
+          type: "integer"
+        gpusAllocated:
+          type: "integer"
+        gpusUnhealthy:
+          type: "integer"
         serversTotal:
           type: integer
         serversOnline:
@@ -1306,6 +2377,9 @@ components:
     GPUInventoryItem:
       type: object
       properties:
+        organizationId:
+          type: string
+          description: "Ownership do backend xác định; GPU suy ra từ Server."
         serverId:
           type: string
         serverName:
@@ -1390,7 +2464,7 @@ components:
           const: false
         performanceProfile:
           type: string
-          description: ID từ backend capability catalog tại jobs/options.
+          description: AUTO hoặc HIGH_PERFORMANCE từ jobs/options. Các ID general/a100-equivalent/h100-equivalent chỉ giữ tương thích client cũ.
         fp8Required:
           type: boolean
       additionalProperties: false
@@ -1452,6 +2526,15 @@ components:
     JobPreview:
       type: object
       properties:
+        planningStatus:
+          type: string
+          enum: [AVAILABLE, CONFLICT]
+        requestedStartAt:
+          type: string
+          format: date-time
+        requestedEndAt:
+          type: string
+          format: date-time
         workloadType:
           type: string
           enum:

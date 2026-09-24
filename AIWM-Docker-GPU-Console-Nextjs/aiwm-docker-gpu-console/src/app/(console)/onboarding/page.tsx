@@ -1,26 +1,57 @@
 "use client";
 
-import { CheckCircle2, Clipboard, Network, Server, TerminalSquare } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardHeader } from "@/components/ui/card";
-import { PageHeader, TableSkeleton } from "@/components/ui/page";
-import { useToast } from "@/components/ui/toast";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { OrganizationSelect } from "@/features/identity/organization-select";
+import { useSession } from "@/features/identity/session";
+import { identityApi, type EnrollmentResult } from "@/lib/api/identity";
 import { useServers } from "@/features/inventory/use-inventory";
-import { relativeTime } from "@/lib/utils/format";
+import { Badge } from "@/components/ui/badge";
 
-const commands = [
-  { title: "Build Agent trên Linux server", command: "go build -trimpath -o bin/aiwm-agent ./cmd/aiwm-agent" },
-  { title: "Kiểm tra Docker và NVIDIA NVML", command: "sudo ./bin/aiwm-agent --check" },
-  { title: "Chạy thử foreground", command: "sudo ./bin/aiwm-agent" },
-];
+function parseLabels(text: string) {
+  const labels: Record<string,string> = {};
+  for (const line of text.split("\n").map(v => v.trim()).filter(Boolean)) {
+    const at = line.indexOf("=");
+    if (at <= 0) throw new Error("Mỗi label cần có dạng key=value.");
+    labels[line.slice(0,at).trim()] = line.slice(at+1).trim();
+  }
+  return labels;
+}
 
 export default function OnboardingPage() {
+  const { user,organization } = useSession();
+  const admin = user.role === "ADMIN";
+  const client = useQueryClient();
+  const organizations = useQuery({ queryKey:["organizations"],queryFn:identityApi.organizations,enabled:admin });
+  const enrollments = useQuery({ queryKey:["enrollments"],queryFn:identityApi.enrollments });
   const servers = useServers();
-  const { pushToast } = useToast();
-  const copy = async (value: string) => { await navigator.clipboard.writeText(value); pushToast({ tone: "success", title: "Đã sao chép lệnh" }); };
-  return <><PageHeader eyebrow="Gradual adoption" title="Onboard Docker GPU Agent" description="Cài Agent dần trên từng máy chủ; không restart workload, không cài lại OS và không đưa máy vào Kubernetes." />
-    <div className="grid gap-5 xl:grid-cols-[1fr_.75fr]"><div className="space-y-5"><Card><CardHeader title="Quy trình triển khai" description="Lặp lại độc lập cho từng GPU server" /><div className="space-y-0 p-5">{[{ icon: TerminalSquare, title: "Chuẩn bị server", text: "Docker Engine, NVIDIA driver, Container Toolkit và quyền truy cập /var/run/docker.sock." }, { icon: Network, title: "Cấu hình outbound", text: "Đặt AIWM_CONTROL_PLANE_URL, enrollment token, machine ID, tên và placement labels." }, { icon: CheckCircle2, title: "Preflight inventory", text: "Chạy --check, đối chiếu toàn bộ GPU/container cũ trước khi đưa GPU trống vào pool." }, { icon: Server, title: "Bật systemd", text: "Agent chủ động register, heartbeat, report inventory và poll command." }].map(({ icon: Icon, title, text }, index) => <div key={title} className="relative flex gap-4 pb-7 last:pb-0"><div className="relative z-10 grid size-9 shrink-0 place-items-center rounded-full bg-slate-950 text-white"><Icon className="size-4" /></div>{index < 3 && <div className="absolute bottom-0 left-[17px] top-9 w-px bg-slate-200" />}<div><p className="font-bold text-slate-950">{index + 1}. {title}</p><p className="mt-1 text-sm leading-6 text-slate-600">{text}</p></div></div>)}</div></Card><Card><CardHeader title="Lệnh lab" description="Chạy trong repository backend Go, không phải frontend" /><div className="space-y-3 p-4">{commands.map((item) => <div key={item.title} className="rounded-xl border border-slate-200 bg-slate-950 p-4 text-white"><div className="mb-2 flex items-center justify-between gap-3"><p className="text-xs font-semibold text-slate-400">{item.title}</p><button onClick={() => copy(item.command)} className="rounded-md p-1.5 text-slate-400 hover:bg-white/10 hover:text-white" aria-label="Sao chép"><Clipboard className="size-4" /></button></div><code className="block overflow-x-auto text-xs text-slate-200">{item.command}</code></div>)}</div></Card></div>
-    <div className="space-y-5"><Card><CardHeader title="Agent đã kết nối" description="Đọc từ GET /api/v1/servers" />{servers.isLoading ? <TableSkeleton rows={4} /> : <div className="divide-y divide-slate-100">{(servers.data ?? []).map((server) => <div key={server.id} className="flex items-center gap-3 p-4"><div className="grid size-9 place-items-center rounded-xl bg-slate-100"><Server className="size-4 text-slate-600" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold text-slate-950">{server.name}</p><p className="mt-0.5 text-xs text-slate-400">v{server.agentVersion || "—"} · heartbeat {relativeTime(server.lastHeartbeatAt)}</p></div><Badge value={server.status} /></div>)}{!servers.isLoading && !(servers.data?.length) && <div className="p-8 text-center text-sm text-slate-500">Chưa có Agent đăng ký.</div>}</div>}</Card><div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-900"><b>Lưu ý quyền:</b> truy cập Docker socket tương đương quyền root. Dùng tài khoản service riêng, bảo vệ token và triển khai TLS theo tài liệu backend.</div><Button variant="secondary" className="w-full" onClick={() => copy("docs/agent-deployment.md")}>Mở hướng dẫn: docs/agent-deployment.md</Button></div></div>
-  </>;
+  const [displayName,setDisplayName] = useState("");
+  const [organizationId,setOrganizationId] = useState(organization.id);
+  const [labels,setLabels] = useState("");
+  const [result,setResult] = useState<EnrollmentResult | null>(null);
+  const [copied,setCopied] = useState(false);
+  const create = useMutation({ mutationFn: () => identityApi.createEnrollment({ displayName,labels:parseLabels(labels),...(admin ? {organizationId} : {}) }),onSuccess: data => { setResult(data); setCopied(false); void client.invalidateQueries({queryKey:["enrollments"]}); } });
+  const revoke = useMutation({ mutationFn:identityApi.revokeEnrollment,onSuccess:() => { setResult(null); void client.invalidateQueries({queryKey:["enrollments"]}); } });
+  return <div className="space-y-6"><div><h1 className="text-2xl font-bold text-slate-900">Kết nối GPU Server</h1><p className="mt-2 text-sm text-slate-500">Tạo mã kết nối riêng cho từng máy chủ.</p></div>
+    <div className="grid gap-5 xl:grid-cols-2">
+      <form className="surface-card space-y-5 p-6" onSubmit={e => { e.preventDefault(); create.mutate(); }}>
+        <h2 className="font-bold">1. Đăng ký kết nối máy chủ</h2>
+        <label className="block"><span className="field-label">Tên máy chủ</span><input className="field-input" required maxLength={200} value={displayName} onChange={e => setDisplayName(e.target.value)} placeholder="GPU server phòng lab" /></label>
+        <div><p className="field-label">Đơn vị sở hữu</p>{admin ? organizations.isError ? <p role="alert" className="text-sm text-red-700">Không tải được đơn vị. <button type="button" onClick={() => void organizations.refetch()}>Thử lại</button></p> : <OrganizationSelect organizations={(organizations.data ?? []).filter(o => o.enabled)} value={organizationId} onChange={setOrganizationId} /> : <p className="rounded-xl border border-red-100 bg-red-50 p-3 text-sm font-semibold text-red-700">{organization.code} · {organization.name}</p>}</div>
+        <label className="block"><span className="field-label">Nhãn (tùy chọn, mỗi dòng key=value)</span><textarea className="field-textarea" rows={3} value={labels} onChange={e => setLabels(e.target.value)} placeholder="location=lab" /></label>
+        {create.isError && <p role="alert" className="text-sm text-red-700">Không tạo được enrollment. {create.error.message}</p>}
+        <button className="btn btn-primary" disabled={create.isPending || (admin && organizations.isPending)}>{create.isPending ? "Đang tạo…" : "Tạo mã kết nối"}</button>
+      </form>
+      <section className="surface-card space-y-4 p-6"><h2 className="font-bold">2. Kết nối máy chủ</h2>
+        {result ? <>
+          <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">Lưu mã này và gửi cho người cài đặt máy chủ. Mã chỉ hiển thị một lần.</p>
+          <pre className="overflow-auto rounded-xl bg-slate-950 p-4 text-xs text-slate-100">{result.enrollmentToken}</pre>
+          <p className="text-sm">Hạn kết nối lần đầu: {new Date(result.expiresAt).toLocaleString("vi-VN")}</p>
+          <button className="btn btn-secondary" onClick={async () => { try { await navigator.clipboard.writeText(result.enrollmentToken); setCopied(true); } catch { setCopied(false); } }}>{copied ? "Đã sao chép" : "Sao chép mã"}</button>
+        </> : <p className="rounded-xl border border-dashed p-5 text-sm text-slate-500">Đăng ký máy chủ để nhận mã kết nối.</p>}
+      </section>
+    </div>
+    <section className="surface-card p-5"><h2 className="mb-4 font-bold">Mã kết nối đã tạo</h2>{enrollments.isPending ? <p role="status">Đang tải…</p> : enrollments.isError ? <p role="alert" className="text-red-700">Không tải được danh sách mã kết nối.</p> : <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr className="border-b text-slate-500"><th className="p-3">Server</th><th>Đơn vị</th><th>Trạng thái</th><th /></tr></thead><tbody>{enrollments.data?.map(e => <tr key={e.id} className="border-b border-slate-100"><td className="p-3 font-semibold">{e.displayName}</td><td>{organizations.data?.find(o => o.id===e.organizationId)?.code ?? organization.code}</td><td><span className={e.revoked ? "badge badge-neutral" : e.machineId ? "badge badge-success" : "badge badge-warning"}>{e.revoked ? "Đã thu hồi" : e.machineId ? "Đã kết nối" : "Chờ kết nối"}</span><p className="mt-1 text-xs text-slate-400">{new Date(e.expiresAt).toLocaleString("vi-VN")}</p></td><td><button className="btn btn-ghost text-red-700" disabled={e.revoked || revoke.isPending} onClick={() => { if (window.confirm("Thu hồi mã kết nối này? Máy chủ đã kết nối và workload đang chạy không bị dừng.")) revoke.mutate(e.id); }}>Thu hồi</button></td></tr>)}</tbody></table>{!enrollments.data?.length && <p className="p-5 text-slate-500">Chưa có mã kết nối.</p>}</div>}{revoke.isError && <p role="alert" className="mt-3 text-red-700">Chưa thu hồi được token.</p>}</section>
+    <section className="surface-card p-5"><h2 className="mb-4 font-bold">Máy chủ đã kết nối</h2>{servers.isError ? <p role="alert" className="text-red-700">Không tải được server.</p> : servers.isPending ? <p role="status">Đang tải…</p> : <div className="grid gap-3 md:grid-cols-2">{servers.data?.map(s => <div className="flex items-center justify-between rounded-xl border p-4" key={s.id}><div><p className="font-semibold">{s.name}</p><p className="mt-1 text-xs text-slate-500">{s.gpus.length} GPU</p></div><Badge value={s.status} /></div>)}{!servers.data?.length && <p className="text-sm text-slate-500">Chưa có máy chủ trong phạm vi đang xem.</p>}</div>}</section>
+  </div>;
 }
