@@ -1,24 +1,19 @@
 import { Card, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { AllocationProgress } from "@/components/workloads/allocation-status";
+import { allocationTimeLabel, allocationWindow } from "@/lib/jobs/presentation";
 import { formatDateTime } from "@/lib/utils/format";
 import type { Job } from "@/lib/api/types";
 
-export function JobLifecycle({ job }: { job: Job }) {
-  const planning = job.status === "RUNNING" ? "Đang chạy" : job.status === "STARTING" ? "Đang khởi động" : job.status === "ASSIGNED" ? "Đã giữ tài nguyên · Chưa chạy" : job.status === "QUEUED" ? "Chưa được cấp tài nguyên" : job.status === "STOPPING" ? "Đang dừng" : "Đã kết thúc";
+export function JobLifecycle({ job, now }: { job: Job; now: number | null }) {
+  const window = allocationWindow(job);
   return <Card><CardHeader title="Lịch cấp phát" />
-    <div className="space-y-4 p-5 text-sm">
-      <p className="font-semibold">{planning}</p>
-      {job.neededAt && <div className="space-y-1 text-slate-600"><p>Bắt đầu yêu cầu: {formatDateTime(job.requestedStartAt)}</p><p>Thời lượng sử dụng: {(job.ttlSeconds ?? 0) / 60} phút</p><p>Kết thúc dự kiến: {formatDateTime(job.requestedEndAt)}</p></div>}
-      {job.assignment && <div className="rounded-lg bg-slate-50 p-3">
-        <p className="font-semibold">{job.assignment.reservationState === "RELEASED" ? "Đã trả tài nguyên" : "Đã giữ tài nguyên"}</p>
-        <p className="mt-1">{formatDateTime(job.assignment.startAt)} → {formatDateTime(job.assignment.endAt)}</p>
-        {job.assignment.releasedAt && <p className="mt-1 text-xs text-slate-500">Trả tài nguyên: {formatDateTime(job.assignment.releasedAt)}</p>}
-      </div>}
-
-      <ol className="space-y-4">{job.events?.map((event, index) => <li key={event.at + index} className="border-l-2 border-slate-200 pl-3">
-        <Badge value={event.status} />
-        <time className="text-xs text-slate-400">{formatDateTime(event.at)}</time>
-      </li>)}</ol>
+    <div className="space-y-5 p-5 text-sm">
+      <dl className="grid gap-4 sm:grid-cols-2">
+        <div><dt className="text-slate-500">Bắt đầu</dt><dd className="mt-1 font-semibold">{window ? formatDateTime(new Date(window.start).toISOString()) : "—"}</dd></div>
+        <div><dt className="text-slate-500">Kết thúc</dt><dd className="mt-1 font-semibold">{window ? formatDateTime(new Date(window.end).toISOString()) : "—"}</dd></div>
+      </dl>
+      <p className="font-semibold text-slate-700">{allocationTimeLabel(job, now)}</p>
+      <div><h3 className="mb-2 text-sm font-semibold text-slate-500">Tiến độ cấp phát</h3><AllocationProgress job={job} now={now} /></div>
     </div>
   </Card>;
 }

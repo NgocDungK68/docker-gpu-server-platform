@@ -1,3 +1,95 @@
+# CURRENT PHASE — B: Workloads UI (25/09/2026)
+
+## PHASE A VERIFIED
+
+Checkpoint nguồn: `bfaa836 feat: checkpoint & save MinIO`. Working tree clean lúc recover. Đã đối chiếu domain/application/httpapi/storage và test, không dùng status cũ làm source duy nhất.
+
+- Checkpoint: WORKING — metadata, upload S3-compatible, warning trước EndAt; TIME_LIMIT giữ checkpoint.
+- Resume: WORKING — continuation tạo Job mới qua policy/calendar; nhận URI đúng, có thể đổi server cùng organization.
+- Final model: WORKING — READY chỉ sau upload + metadata commit, tách khỏi SUCCEEDED.
+- Download: WORKING — xác thực và scope organization trước URL có chữ ký.
+- Backend/API Phase A được reuse nguyên vẹn trong phiên này; UI actions đã nối ở Phase B.
+- Metadata runtime hiện vẫn durable gob; PostgreSQL operational repository và Prometheus chưa có.
+
+## PHASE B STATUS — DONE
+
+## DONE
+
+- Workloads có đúng 6 cột: Dự án / Loại workload / GPU / Thời gian / Tiến độ cấp phát / Trạng thái.
+- GPU display lấy model từ inventory của assigned server cùng organization; không hiện UUID. Chưa placement dùng nhu cầu GPU/profile; thiếu inventory thì chỉ hiện số GPU, không đoán model.
+- Relative time và allocation progress dùng helper chung. Future 0%, elapsed clamp 0–100%; 70% vàng, 90% đỏ; expired/TIME_LIMIT vẫn 100% đỏ.
+- Warning consume CheckpointWarningAt/REQUESTED từ backend, không tính lại warningLead ở frontend.
+- Business status: lên lịch, chạy, cảnh báo, lưu checkpoint/model, thu hồi, có thể tiếp tục, hết thời gian, hoàn thành, thất bại/hủy.
+- Artifact FAILED hiện “Lỗi lưu model”/“Không lưu được model đầu ra”, không giả vờ đang upload.
+- Detail chỉ có thông tin vận hành, checkpoint/model; bỏ raw URI/UUID, command/config/debug notes khỏi màn detail.
+- “Xin cấp phát tiếp” mở form start/duration, lấy duration limit từ API options, gọi continuation API; xử lý lỗi/retry, dẫn sang Job mới. Chuyển giờ sang giây bằng làm tròn để tránh lỗi floating point.
+- “Tải model” chỉ hiện khi READY; URL chỉ dùng để tải, không render lên UI.
+- Poll Job 10 giây; clock chung cập nhật time/progress 10 giây. Giữ API authorization hiện có.
+- Không sửa Agent/NVML/Docker, backend policy/planner/reservation, dashboard hoặc arbitrary label feature.
+
+## PARTIAL
+
+- Không còn implementation dang dở của Phase B.
+- Browser E2E dùng BFF fixtures; authorization/storage thật đã kiểm bằng backend tests Phase A. Không claim live full-stack/GPU E2E trong phiên này.
+- Model của GPU trong Job lịch sử không có snapshot riêng: nếu inventory nguồn không còn, UI fallback số GPU.
+- Continuation giữ ràng buộc context submit của API Phase A; backend vẫn quyết định quyền, không thêm cross-organization bypass.
+- Chưa rebuild frontend/CP trên Docker stack 3000/8080; bản đang chạy ở đó có thể còn là image trước checkpoint. Next dev 3100 dùng cho tests phiên này đã được dừng.
+- Phase C và các phase PostgreSQL runtime/Prometheus/simulation mở rộng ngoài scope phiên này.
+
+## TESTS
+
+- PASS: `go test ./internal/application ./internal/httpapi ./internal/store/durable -run Training -count=1` (không chạy MinIO opt-in trong lượt verify này).
+- PASS: `node --experimental-strip-types --test tests/workload-presentation.test.mjs` — 4 nhóm: status, time/progress, warning authority, GPU/organization matching.
+- PASS: `npm.cmd run typecheck`.
+- PASS: ESLint trực tiếp 8 files frontend/test liên quan; không lint toàn app.
+- PASS: `tests/e2e/workload-allocation.spec.ts` — 3/3 Edge tests, Next dev 3100, có mobile 390px, expired bar, warning, continuation error/retry, download.
+- PASS: rerun riêng continuation sau sửa duration 1.11 giờ → 3996 giây.
+- Lỗi trong lần browser đầu đã sửa: assertion UUID match nhầm chữ “Training2”; dòng “Hoàn thành” bị lặp; search field bị co bởi select width.
+- Không chạy full build/Docker stack, benchmark, GPU integration hoặc sửa các phase sau.
+
+## VERIFIED COMMANDS
+
+Từ backend:
+~~~powershell
+go test ./internal/application ./internal/httpapi ./internal/store/durable -run Training -count=1
+~~~
+
+Từ frontend:
+~~~powershell
+npm.cmd run typecheck
+node --experimental-strip-types --test tests/workload-presentation.test.mjs
+npm.cmd run dev -- --hostname 127.0.0.1 --port 3100
+~~~
+
+Trong terminal frontend khác, khi Next dev 3100 đã ready:
+~~~powershell
+$env:AIWM_CONSOLE_URL='http://127.0.0.1:3100'
+$env:AIWM_BROWSER_CHANNEL='msedge'
+npm.cmd run test:e2e -- tests/e2e/workload-allocation.spec.ts
+~~~
+
+## FILES CHANGED
+
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/workloads/[jobId]/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/workloads/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/workloads/allocation-status.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/workloads/continuation-dialog.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/workloads/job-lifecycle.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/features/workloads/use-workloads.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/lib/jobs/presentation.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/tests/e2e/workload-allocation.spec.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/tests/workload-presentation.test.mjs`
+- `docs/IMPLEMENTATION_STATUS.md`
+
+
+## NEXT STEP
+
+Phase C — remove arbitrary user labels. Bắt đầu tại frontend `src/app/(console)/onboarding/page.tsx` và API enrollment tương ứng; chỉ bỏ label tùy ý của user/admin, giữ internal ownership labels. Không làm lại Phase A/B. Chưa bắt đầu Phase C trong checkpoint này.
+
+---
+
+## Lịch sử trước checkpoint Phase A (giữ nguyên)
+
 # Current Task
 
 Dashboard fleet + capability input tối giản + account context + UI tiếng Việt (23/09/2026).
