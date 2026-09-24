@@ -25,8 +25,7 @@ export function AccountBadge() {
   const session = useSession();
   const client = useQueryClient();
   return <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
-    <span className="rounded-full bg-red-50 px-3 py-1.5 font-bold text-red-700" title={session.organization.name}>{session.organization.code}</span>
-    <span className="hidden text-slate-600 sm:block">{session.user.username} · {session.user.role}</span>
+    <span aria-label="Tài khoản hiện tại" className="rounded-full bg-red-50 px-3 py-1.5 font-bold text-red-700" title={session.user.role === "ADMIN" ? session.user.username : session.organization.name}>{session.user.role === "ADMIN" ? session.user.username : session.organization.code}</span>
     <button className="rounded-lg border px-2 py-1.5 hover:bg-slate-50" onClick={async () => { try { await identityApi.logout(); await client.cancelQueries(); client.clear(); window.location.replace("/login"); } catch { window.alert("Chưa đăng xuất được. Vui lòng thử lại khi kết nối phục hồi."); } }}>Đăng xuất</button>
   </div>;
 }

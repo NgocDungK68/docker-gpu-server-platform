@@ -276,50 +276,53 @@ Phụ thuộc số/độ dài command/env và catalog scan; không gán O(1) cho
 
 ### Mục tiêu
 
-Đổi requirement thành exact model constraints dùng chung planner và atomic commit.
+Bốn capability inputs mới: GPUCount, MinVRAMMiB, PerformanceProfile và FP8Required. Backend quyết định model phù hợp; frontend chỉ chọn Auto hoặc Hiệu năng cao.
 
 ### Khi nào được gọi
 
-`prepareJob` gọi `catalog.Resolve(profile, fp8)` sau validation; `CapabilityMatches` được gọi khi filtering và commit.
+`prepareJob` gọi `catalog.Resolve(profile, fp8)`; `CapabilityMatches` được dùng chung khi planning và commit. Không thay thứ tự policy, ownership, calendar hay công thức placement.
 
 ### Đầu vào
 
-`AllocationResources.PerformanceProfile`, `FP8Required`; `Catalog.profiles[].Models{Name,FP8}`; lúc match: `ResourceRequest`, `GPU.Model`.
+`AllocationResources.PerformanceProfile`, `FP8Required`; catalog tập trung tại `internal/capability/catalog.go` và `GPU.Model`.
 
 ### Đầu ra
 
-`ResourceRequest.ResolvedModels` sort theo tên, lưu private cùng Job; unknown profile trả ErrInvalidInput. Profile có thật nhưng không model FP8 trả danh sách rỗng, không lỗi.
+`jobs/options.performanceProfiles` chỉ công bố `AUTO` và `HIGH_PERFORMANCE`. Danh sách `ResolvedModels` private được lưu cùng Job khi có giới hạn model. `AUTO + false` không có giới hạn model nên trả nil.
 
 ### Hard constraints
 
-New request bắt buộc profile được biết và FP8 boolean. Với profile/FP8 constraints, model inventory phải khớp một alias; không substring match hoặc wildcard cho unknown model.
+- `AUTO + FP8Required=false`: mọi model, kể cả model chưa có trong catalog, đều qua bước capability; vẫn phải qua organization, time availability, health/state, số GPU và VRAM.
+- `AUTO + FP8Required=true`: chỉ alias có FP8=true trong catalog.
+- `HIGH_PERFORMANCE`: nhóm H100/H200 do project phân loại tại catalog; không phải điểm hiệu năng đo được. Không có fallback sang GPU ngoài nhóm khi thiếu tài nguyên.
+- So model bằng `EqualFold(trim(GPU.Model), alias)`. Unknown model không được suy ra FP8.
+- CPU/RAM là execution limits tương thích, không phải capability constraint; form mới không gửi hai field này.
 
 ### Công thức / comparator
 
-`Resolve(p,f) = sort([trim(m.Name) | m thuộc profile p và (không f hoặc m.FP8)])`.
+`AUTO && !FP8Required ⇒ CapabilityMatches = true`.
 
-| Profile | Model aliases trong source |
+Các profile bị giới hạn model: `Resolve(p,f) = sort([trim(m.Name) | m thuộc p và (!f hoặc m.FP8)])`.
+
+| Nhóm trong catalog | Alias / capability |
 |---|---|
-| `general` | Tất cả aliases T4 + A100 + H100 bên dưới |
-| `a100-equivalent` | `A100`, `NVIDIA-A100-80GB`, `NVIDIA A100-SXM4-40GB`, `NVIDIA A100-SXM4-80GB`, `NVIDIA A100 80GB PCIe` |
-| `h100-equivalent` | `H100`, `NVIDIA H100 80GB HBM3`, `NVIDIA H100 PCIe` |
-| T4 aliases của general | `T4`, `Tesla T4`, `NVIDIA T4` |
+| HIGH_PERFORMANCE | H100, NVIDIA H100 80GB HBM3, NVIDIA H100 PCIe; H200, NVIDIA H200, NVIDIA H200 NVL. FP8=true. |
+| AUTO có yêu cầu FP8 | Nhóm trên và L40S, NVIDIA L40S; FP8=true. |
+| Alias tương thích cũ | T4/Tesla T4/NVIDIA T4 và A100/NVIDIA-A100-80GB/NVIDIA A100-SXM4-40GB/NVIDIA A100-SXM4-80GB/NVIDIA A100 80GB PCIe có FP8=false. |
 
-Catalog gắn FP8=true cho H100 aliases, false cho A100/T4. Đây là metadata trong code, không suy từ NVML hoặc lý thuyết bên ngoài. Không có H200 default.
-
-Khi `PerformanceProfile != "" OR FP8Required`: `EqualFold(trim(GPU.Model), resolvedAlias)`. Chỉ nhánh legacy không profile và không FP8 mới dùng `GPUModel=="" OR EqualFold(GPU.Model,GPUModel)`; nhánh legacy không trim model. ResolvedModels rỗng ở nhánh mới không fallback sang GPUModel.
+`general`, `a100-equivalent`, `h100-equivalent` vẫn được resolver chấp nhận để request/script cũ không hỏng, nhưng không công bố trong options/UI mới. Mapping cũ giữ nguyên (general = T4/A100/H100). Job đã lưu vẫn dùng ResolvedModels đã pin. Nhánh persisted Job không profile và không FP8 tiếp tục dùng GPUModel cũ.
 
 ### Pseudocode
 
-`find exact profile → filter aliases theo FP8 flag → sort → persist; lúc match chọn nhánh profile hoặc legacy, không trộn hai nhánh`.
+`AUTO không FP8 → không giới hạn model; còn lại → tìm profile → lọc alias FP8 → sort → pin; planner/commit kiểm CapabilityMatches`.
 
 ### Ví dụ
 
-`a100-equivalent + fp8Required=true` hợp lệ về profile nhưng resolve rỗng và không placement; `general + true` chỉ match H100 aliases. Model `H100-custom` không tự match.
+AUTO/không FP8 nhận model mới chưa có catalog nếu các điều kiện khác đạt. AUTO/FP8 từ chối A100 và model chưa biết. HIGH_PERFORMANCE nhận H200, từ chối A100/L40S dù còn trống.
 
 ### Complexity
 
-Resolve: O(P + R_p log R_p) với P profiles và R_p aliases profile; CapabilityMatches: O(1+R). Tính cả scan model trước sort không làm tăng cận.
+AUTO/không FP8: O(1). Profile có danh sách: O(P + R_p log R_p) cho resolve; O(R_p) cho một phép match GPU.
 
 ### Source mapping
 

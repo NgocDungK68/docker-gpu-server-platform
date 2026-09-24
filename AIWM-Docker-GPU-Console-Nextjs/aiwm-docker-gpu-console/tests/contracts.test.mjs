@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { jobFormSchema, parseKeyValueLines, allocationFormSchema, allocationInput } from "../src/lib/jobs/form-schema.ts";
 import { allowedMutationOrigin, allowedPublicRoute } from "../src/lib/api/proxy-policy.ts";
 
-const valid = { name: "gpu-demo", image: "alpine:3.21", commandLines: "", environmentLines: "", gpuCount: 1, minVramMiB:1024, performanceProfile:"general", fp8Required:false, workloadType:"TRAINING",necessityLevel:"NECESSITY_2",necessityReason:"GO_LIVE_90_DAYS",necessityExplanation:"",systemImportance:"IMPORTANT",neededAt:new Date(Date.now() + 3600000 - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16),ttlHours:1 };
+const valid = { name: "gpu-demo", image: "alpine:3.21", commandLines: "", environmentLines: "", gpuCount: 1, minVramGB:1, performanceProfile:"AUTO", fp8Required:false, workloadType:"TRAINING",necessityLevel:"NECESSITY_2",necessityReason:"GO_LIVE_90_DAYS",necessityExplanation:"",systemImportance:"IMPORTANT",neededAt:new Date(Date.now() + 3600000 - new Date().getTimezoneOffset()*60000).toISOString().slice(0,16),ttlHours:1 };
 
 test("same-origin mutation works for inbound localhost and IP hosts, rejects foreign origins", () => {
  assert.equal(allowedMutationOrigin("http://127.0.0.1:3000", "127.0.0.1:3000"), true);
@@ -24,9 +24,12 @@ test("intent input preserves empty environment and omits placement controls", ()
    assert.equal(jobFormSchema.safeParse({...valid,[field]:"forbidden"}).success,false);
  }
  assert.equal("gpuModel" in input.resources,false);
+ assert.equal(input.resources.minVramMiB,1024);
+ assert.equal("cpuMilli" in input.resources,false);
+ assert.equal("memoryMiB" in input.resources,false);
 });
 test("catalog supplies limits and workload-specific reasons", () => {
- const options={limits:{maxGpuCount:8,maxTtlSeconds:7200},performanceProfiles:[{id:"general",label:"Tổng quát"}],
+ const options={limits:{maxGpuCount:8,maxTtlSeconds:7200},performanceProfiles:[{id:"AUTO",label:"Tổng quát"}],
  customReason:{id:"CUSTOM",label:"Khác"},necessityProfiles:[{workloadType:"TRAINING",level:"NECESSITY_2",reasons:[{id:"GO_LIVE_90_DAYS",label:"Go-live"}]}]};
  const schema=allocationFormSchema(options);
  assert.equal(schema.safeParse(valid).success,true);
@@ -40,7 +43,7 @@ for (const environmentLines of ["missing-equals", "A=1\nA=2", "NVIDIA_VISIBLE_DE
  test("reject malformed or unsafe environment: " + environmentLines, () => assert.equal(jobFormSchema.safeParse({ ...valid, environmentLines }).success, false));
 }
 test("validate counts and resource limits", () => {
- for (const fields of [{gpuCount: 0}, {gpuCount: -1}, {gpuCount: 1.5}, {minVramMiB:0}, {minVramMiB:-1}, {workloadType:"OTHER"}, {systemImportance:"OTHER"}, {necessityLevel:"NECESSITY_5"}, {neededAt:"invalid"}, {neededAt:"2026-02-30T10:00"}, {ttlHours:0}, {memoryMiB: -1}, {image: "bad image"}]) assert.equal(jobFormSchema.safeParse({...valid, ...fields}).success, false);
+ for (const fields of [{gpuCount: 0}, {gpuCount: -1}, {gpuCount: 1.5}, {minVramGB:0}, {minVramGB:-1}, {workloadType:"OTHER"}, {systemImportance:"OTHER"}, {necessityLevel:"NECESSITY_5"}, {neededAt:"invalid"}, {neededAt:"2026-02-30T10:00"}, {ttlHours:0}, {memoryMiB: -1}, {image: "bad image"}]) assert.equal(jobFormSchema.safeParse({...valid, ...fields}).success, false);
 });
 test("proxy allows public routes but rejects Agent, Docker, traversal and unsupported verbs", () => {
  assert.equal(allowedPublicRoute("GET", ["servers", "srv_123"]), true);

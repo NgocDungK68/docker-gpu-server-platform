@@ -1,24 +1,29 @@
+import { CheckCircle2, Loader2 } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/card";
 import type { JobPreview } from "@/lib/api/types";
 import { formatDateTime } from "@/lib/utils/format";
 
-export function AllocationPreview({ result, stale }: { result?: JobPreview; stale: boolean }) {
+export function AllocationPreview({ result, loading, error, onRetry }: {
+  result?: JobPreview; loading: boolean; error?: string; onRetry: () => void;
+}) {
   return <Card aria-live="polite">
-    <CardHeader title="ĐỐI CHIẾU TỰ ĐỘNG" description="Đối chiếu nhu cầu với chính sách và tài nguyên hiện tại." />
+    <CardHeader title="Tài nguyên phù hợp" />
     <div className="space-y-4 p-5 text-sm">
-      {!result ? <p>{stale ? "Thông tin đã thay đổi. Hãy đối chiếu lại trước khi gửi." : "Nhập đủ thông tin rồi chọn Đối chiếu tự động."}</p> : <>
-        <p>{result.sizingPlanStatus}</p>
-        <p>{result.quotaStatus}</p>
-        <Detail label="Mức ưu tiên" value={result.necessityLabel} />
-        <Detail label="Thời gian đăng ký" value={`${formatDateTime(result.requestedStartAt)} → ${formatDateTime(result.requestedEndAt)}`} />
-        <Detail label="Lịch cấp phát" value={result.planningStatus === "AVAILABLE" ? "Có thể giữ tài nguyên trong khoảng thời gian này" : "Đang xung đột hoặc chưa đủ tài nguyên phù hợp"} />
-        <p>{result.policyReason}</p>
-        <Detail label="GPU phù hợp hiện tại" value={result.resourceMatch.recommendedGpuModels.join(" / ") || "Chưa có GPU phù hợp khả dụng"} />
-        <Detail label="Phương án phù hợp" value={result.resourceMatch.matchedGpuCount + " GPU trong khoảng thời gian đăng ký"} />
-        <Detail label="Khuyến nghị" value={result.resourceMatch.recommendationText} />
-        {result.policySource === "DEVELOPMENT_CONFIG" && <p className="text-amber-700">Quy hoạch và hạn mức hiện lấy từ cấu hình demo.</p>}
-        <p className="text-slate-500">Đối chiếu chưa giữ tài nguyên. Khi gửi, hệ thống kiểm tra lại; kết quả cấp phát có thể thay đổi.</p>
-      </>}
+      {loading ? <p role="status" className="flex items-center gap-2"><Loader2 className="size-4 animate-spin" />Đang kiểm tra tài nguyên…</p>
+        : error ? <div role="alert"><p className="text-red-700">{error}</p><button type="button" className="mt-2 font-semibold underline" onClick={onRetry}>Thử lại</button></div>
+        : !result ? <p className="text-slate-500">Nhập đủ thông tin để xem tài nguyên phù hợp.</p>
+        : <>
+          <p className={result.resourceMatch.satisfiable ? "flex items-center gap-2 font-semibold text-emerald-700" : "font-semibold text-amber-700"}>
+            {result.resourceMatch.satisfiable && <CheckCircle2 className="size-5" />}
+            {result.resourceMatch.satisfiable ? "Có tài nguyên phù hợp" : "Không đủ GPU trong khoảng thời gian đã chọn."}
+          </p>
+          <Detail label="Thời gian sử dụng" value={formatDateTime(result.requestedStartAt) + " → " + formatDateTime(result.requestedEndAt)} />
+          {result.resourceMatch.satisfiable && <>
+            <Detail label="GPU phù hợp" value={result.resourceMatch.recommendedGpuModels.join(", ")} />
+            <Detail label="Có thể đáp ứng" value={result.resourceMatch.matchedGpuCount + " GPU theo yêu cầu"} />
+          </>}
+          {!result.resourceMatch.satisfiable && <p>Thử giảm số GPU, đổi yêu cầu hoặc chọn khoảng thời gian khác.</p>}
+        </>}
     </div>
   </Card>;
 }

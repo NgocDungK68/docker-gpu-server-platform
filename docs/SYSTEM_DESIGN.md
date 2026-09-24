@@ -273,6 +273,16 @@ Submit giữ execution specification, tạo QUEUED; planning cycle mới tạo A
 Nguồn: application/allocation.go, planning.go; components/workloads/job-form.tsx và job-lifecycle.tsx.
 
 
+### Capability input và Tổng quan tài nguyên
+
+Form chỉ có số GPU, VRAM tối thiểu theo GB (quy đổi 1 GB trên UI = 1024 MiB), AUTO/HIGH_PERFORMANCE và FP8. Giữ workloadType, lịch/thời lượng, policy và image/command/environment. CPU/RAM không còn là input của form; API cũ vẫn có execution limits tùy chọn.
+
+Backend capability.Catalog công bố hai profile mới; AUTO không FP8 không ép model. HIGH_PERFORMANCE dùng nhóm H100/H200 tập trung trong catalog. Alias profile cũ chỉ giữ tương thích. Preview tự chạy sau 400 ms khi form hợp lệ, hủy request cũ khi input đổi; không dùng preview cũ để submit. matchedGpuCount là số GPU đáp ứng request trong phương án, không phải tổng GPU trống toàn fleet.
+
+Tổng quan lấy Server[] từ API đã scope theo session rồi tổng hợp GPU theo OrganizationID. ADMIN mặc định toàn hệ thống; header dùng username, không dùng home organization của admin. User thường chỉ nhận tài nguyên đơn vị của mình từ backend.
+
+Util TB = tổng UtilizationPct hợp lệ / số GPU có mẫu hợp lệ, không phải trung bình của các trung bình đơn vị. Chỉ tính GPU Healthy, không UNHEALTHY, utilization là số hữu hạn 0–100, server không OFFLINE và có inventoryReceivedAt hợp lệ. 0% là mẫu hợp lệ; không có mẫu thì hiển thị “—”. Máy ngừng nhận workload vẫn có thể có telemetry. Đây là snapshot inventory mới nhất, không có lịch sử hoặc ngưỡng freshness mới ở frontend; API hiện chưa có validity flag riêng cho từng telemetry field. Count ALLOCATED vẫn giữ last-known khi máy offline; FREE sẵn sàng chỉ tính trên server.schedulable.
+
 ## D7 — Scheduler internal flow
 
 Trước mọi resource filter/scoring, Scheduler.filter chạy SameOrganization(Job.OrganizationID, Server.OrganizationID). Server khác đơn vị không được dùng để xây candidate/recommendation.

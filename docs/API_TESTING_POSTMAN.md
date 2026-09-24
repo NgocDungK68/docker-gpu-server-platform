@@ -602,7 +602,7 @@ GET /api/v1/containers
   "resources": {
     "gpuCount": 1,
     "minVramMiB": 1024,
-    "performanceProfile": "a100-equivalent",
+    "performanceProfile": "AUTO",
     "fp8Required": false
   },
   "necessityLevel": "NECESSITY_2",
@@ -612,6 +612,10 @@ GET /api/v1/containers
   "ttlSeconds": 3600
 }
 ~~~
+
+Profile cho client mới: AUTO / HIGH_PERFORMANCE (GET jobs/options chỉ trả hai lựa chọn). AUTO không FP8 không giới hạn model; HIGH_PERFORMANCE hiện là nhóm H100/H200 trong catalog. FP8 bắt buộc chỉ match alias đã được backend khai báo hỗ trợ. Profile cũ vẫn được chấp nhận để tương thích script hiện tại, không còn trên form. CPU/RAM tùy chọn; không gửi thì dùng giá trị mặc định hiện có (0), không thêm constraint placement.
+
+Frontend tự preview sau debounce 400 ms khi đủ thông tin, không có nút đối chiếu. GPU count trong preview là matchedGpuCount của phương án đáp ứng yêu cầu; không diễn giải thành tổng capacity khả dụng. Form nhập GB, gửi minVramMiB = GB × 1024. Giờ bắt đầu/thời lượng và endpoint preview/submit không đổi.
 
 Các fields bắt buộc: name/image, workloadType, resources.gpuCount/minVramMiB/performanceProfile/fp8Required, necessityLevel/necessityReason, systemImportance, neededAt, ttlSeconds. CUSTOM cần necessityExplanation. GPU/VRAM phải số nguyên >0; FP8 phải boolean (không null/string), profile hợp lệ. Backend yêu cầu TTL trong giới hạn và RFC3339 có múi giờ. Max GPU/TTL đọc Options, không giả định luôn 64/2592000. neededAt chỉ cho phép lệch quá khứ tối đa 60 giây; interval phải chưa hết. ttlSeconds tính EndAt và trigger STOP.
 

@@ -164,6 +164,7 @@ export interface AllocationIntent {
   neededAt: string;
   ttlSeconds: number;
 }
+export type PerformanceProfile = "AUTO" | "HIGH_PERFORMANCE";
 export interface CreateJobInput extends AllocationIntent {
   name: string;
   image: string;
@@ -173,7 +174,7 @@ export interface CreateJobInput extends AllocationIntent {
   resources: {
     gpuCount: number;
     minVramMiB: number;
-    performanceProfile: string;
+    performanceProfile: PerformanceProfile;
     fp8Required: boolean;
     cpuMilli?: number;
     memoryMiB?: number;

@@ -1927,7 +1927,7 @@ components:
           const: false
         performanceProfile:
           type: string
-          description: ID từ backend capability catalog tại jobs/options.
+          description: AUTO hoặc HIGH_PERFORMANCE từ jobs/options. Các ID general/a100-equivalent/h100-equivalent chỉ giữ tương thích client cũ.
         fp8Required:
           type: boolean
       additionalProperties: false
@@ -2318,7 +2318,7 @@ components:
           const: false
         performanceProfile:
           type: string
-          description: ID từ backend capability catalog tại jobs/options.
+          description: AUTO hoặc HIGH_PERFORMANCE từ jobs/options. Các ID general/a100-equivalent/h100-equivalent chỉ giữ tương thích client cũ.
         fp8Required:
           type: boolean
       additionalProperties: false

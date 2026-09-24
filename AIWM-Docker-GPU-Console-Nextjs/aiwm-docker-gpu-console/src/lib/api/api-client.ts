@@ -74,7 +74,7 @@ const liveApi = {
   getContainers: (origin?: ContainerOrigin, organizationId?: string) =>
     request<ContainerInventoryItem[]>(scoped(endpoints.containers(origin), organizationId)),
   getAllocationOptions: () => request<AllocationOptions>(endpoints.jobOptions),
-  previewJob: (input: CreateJobInput) => request<JobPreview>(endpoints.jobPreview, { method: "POST", body: JSON.stringify(input) }),
+  previewJob: (input: CreateJobInput, signal?: AbortSignal) => request<JobPreview>(endpoints.jobPreview, { method: "POST", body: JSON.stringify(input), signal }),
   getJobs: (organizationId?: string) => request<Job[]>(scoped(endpoints.jobs, organizationId)),
   getJob: (id: string) => request<Job>(endpoints.job(id)),
   createJob: (input: CreateJobInput) =>

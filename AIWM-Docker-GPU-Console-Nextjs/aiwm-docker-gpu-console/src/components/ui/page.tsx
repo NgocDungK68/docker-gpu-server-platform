@@ -9,7 +9,7 @@ export function EmptyState({ icon, title, description, action, className }: { ic
 }
 
 export function ErrorState({ message, onRetry }: { message?: string; onRetry?: () => void }) {
-  return <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800"><p className="font-semibold">Không tải được dữ liệu</p><p className="mt-1">{message ?? "Kiểm tra Control Plane và thử lại."}</p>{onRetry && <button className="mt-3 font-semibold underline" onClick={onRetry}>Tải lại</button>}</div>;
+  return <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800"><p className="font-semibold">Không tải được dữ liệu</p><p className="mt-1">{message ?? "Kiểm tra kết nối và thử lại."}</p>{onRetry && <button className="mt-3 font-semibold underline" onClick={onRetry}>Tải lại</button>}</div>;
 }
 
 export function TableSkeleton({ rows = 5 }: { rows?: number }) {

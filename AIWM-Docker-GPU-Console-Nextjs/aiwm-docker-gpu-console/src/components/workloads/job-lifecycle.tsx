@@ -12,11 +12,11 @@ export function JobLifecycle({ job }: { job: Job }) {
       {job.assignment && <div className="rounded-lg bg-slate-50 p-3">
         <p className="font-semibold">{job.assignment.reservationState === "RELEASED" ? "Đã trả tài nguyên" : "Đã giữ tài nguyên"}</p>
         <p className="mt-1">{formatDateTime(job.assignment.startAt)} → {formatDateTime(job.assignment.endAt)}</p>
-        {job.assignment.releasedAt && <p className="mt-1 text-xs text-slate-500">Nhả GPU: {formatDateTime(job.assignment.releasedAt)}</p>}
+        {job.assignment.releasedAt && <p className="mt-1 text-xs text-slate-500">Trả tài nguyên: {formatDateTime(job.assignment.releasedAt)}</p>}
       </div>}
-      <p className="break-all text-xs text-slate-500">Container: {job.containerId || "Chưa quan sát được"}</p>
+
       <ol className="space-y-4">{job.events?.map((event, index) => <li key={event.at + index} className="border-l-2 border-slate-200 pl-3">
-        <Badge value={event.status} /><p className="mt-1 text-slate-600">{event.reason}</p>
+        <Badge value={event.status} />
         <time className="text-xs text-slate-400">{formatDateTime(event.at)}</time>
       </li>)}</ol>
     </div>

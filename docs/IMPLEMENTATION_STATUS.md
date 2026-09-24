@@ -1,5 +1,95 @@
 # Current Task
 
+Dashboard fleet + capability input tối giản + account context + UI tiếng Việt (23/09/2026).
+Checkpoint đầu phiên: 6d7d75e; working tree ban đầu clean.
+
+## DONE
+
+- Header chung: ADMIN dùng username; user đơn vị dùng organization.code; bỏ context VTT mặc định khỏi admin.
+- Tổng quan chỉ còn fleet KPIs và bảng theo đơn vị (ADMIN)/máy chủ (user); bỏ toàn bộ Job/events/attention blocks.
+- Tổng hợp từ Server[] API đã scope ở backend. Util TB tính từng mẫu GPU hợp lệ, giữ 0%, không có mẫu hiển thị “—”; không thêm lịch sử/analytics.
+- Form chỉ có bốn capability controls: số GPU, VRAM GB, AUTO/HIGH_PERFORMANCE, FP8. Giữ Training/Inference, image/command/env, policy, neededAt và duration. Không gửi CPU/RAM.
+- Catalog backend tập trung: AUTO không FP8 không ép model, HIGH_PERFORMANCE nhóm H100/H200; FP8 match alias được khai báo. Profile cũ giữ tương thích API/script nhưng không xuất hiện trong options/UI.
+- Preview debounce 400 ms, hủy request cũ; input thay đổi không dùng kết quả cũ để submit. Preview vẫn dùng time planner hiện có, không tạo reservation.
+- Dọn technical notes trên tất cả console pages; giữ hành động và trạng thái nghiệp vụ, xác nhận dừng/thu hồi. Enum backend không đổi.
+- Go tests liên quan PASS, không đổi Agent/NVML/Docker/auth/Policy formula/placement/calendar.
+
+## PARTIAL
+
+- Không còn implementation dở dang trong scope UI/capability này. Browser đã PASS 4/4 cases sau khi sửa liên kết label/control trong form.
+- Telemetry hiện không có validity flag riêng từng field: chỉ kiểm số hữu hạn 0–100, GPU Healthy, server không OFFLINE và có inventory timestamp. Không suy ra lịch sử hoặc freshness timeout mới.
+- Không chạy toàn Docker fake demo, GPU thật hay production frontend build trong task UI này.
+
+## TODO
+
+- Kiểm tra chấp nhận bằng tài khoản demo trên stack thật sau khi khởi động lại với code mới; chưa chạy full Docker E2E trong task này.
+
+## TESTS
+
+- PASS: go test ./internal/capability ./internal/domain ./internal/application ./internal/httpapi ./internal/store/memory ./internal/store/durable ./internal/policy.
+- PASS: npm.cmd run typecheck; ESLint các file frontend liên quan.
+- PASS: node --experimental-strip-types --test tests/contracts.test.mjs tests/fleet.test.mjs (11 + 2 tests).
+- PASS: Playwright tests/e2e/fleet-capability.spec.ts — 4 cases (3 pass ở lần đầu, case form pass sau sửa accessibility), Edge/Next dev cổng 3100, mock BFF payload. Các màn list/detail/settings/onboarding cũng được duyệt.
+- PASS: typecheck sau sửa cuối; ESLint targeted; git diff --check.
+- Lỗi đã sửa: label bao select/error khiến accessible name không ổn định; Field dùng useId + htmlFor/id + aria-describedby.
+- Authorization thật kiểm tra bằng Go HTTP tests. Không suy diễn UI mock thành live backend E2E.
+- Next dev cổng 3100 do phiên này tạo đã dừng; không đụng Docker/container hay dịch vụ khác.
+
+## FILES CHANGED
+
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/containers/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/gpus/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/onboarding/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/organizations/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/queue/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/scheduler/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/servers/[serverId]/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/servers/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/settings/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/workloads/[jobId]/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/workloads/new/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/workloads/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/dashboard/metric-card.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/layout/brand.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/layout/connection-status.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/layout/topbar.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/ui/badge.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/ui/page.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/workloads/allocation-preview.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/workloads/job-form.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/components/workloads/job-lifecycle.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/config/navigation.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/features/dashboard/fleet.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/features/dashboard/use-dashboard.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/features/identity/organization-context.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/features/identity/session.tsx`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/lib/api/api-client.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/lib/api/types.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/lib/jobs/form-schema.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/lib/utils/display.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/tests/contracts.test.mjs`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/tests/e2e/fleet-capability.spec.ts`
+- `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/tests/fleet.test.mjs`
+- `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/api/openapi.yaml`
+- `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/application/capability_test.go`
+- `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/capability/catalog.go`
+- `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/capability/catalog_test.go`
+- `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/domain/allocation.go`
+- `docs/ALGORITHMS.md`
+- `docs/API_TESTING_POSTMAN.md`
+- `docs/IMPLEMENTATION_STATUS.md`
+- `docs/SYSTEM_DESIGN.md`
+
+## NEXT STEP
+
+Khởi động lại demo với code mới và kiểm tra chấp nhận giao diện bằng admin/VTT. Không audit lại backend; task UI/capability đã hoàn tất.
+
+---
+
+## Checkpoint trước: Time-based Planning
+
+
 Time-based Resource Allocation Planning + Workload Execution — tiếp tục implementation dang dở từ checkpoint 40d4a0a (23/09/2026).
 
 CURRENT MILESTONE = WORKING CHECKPOINT: future reservation works and does NOT execute early.
