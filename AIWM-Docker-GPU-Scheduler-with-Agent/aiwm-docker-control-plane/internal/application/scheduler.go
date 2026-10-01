@@ -85,7 +85,7 @@ func (s Scheduler) Plan(job domain.Job, servers []domain.Server, now time.Time) 
 // filter reports the furthest satisfied constraint so queued jobs have actionable reasons.
 func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time) ([]candidate, string) {
 	result := make([]candidate, 0)
-	online, labels, model, healthy, available, vram := false, false, false, false, false, false
+	online, model, healthy, available, vram := false, false, false, false, false
 	external, unknown := false, false
 	sameOrganization := false
 	for _, server := range servers {
@@ -95,10 +95,6 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 			continue
 		}
 		online = true
-		if !labelsMatch(server.Labels, job.ServerSelector) {
-			continue
-		}
-		labels = true
 		for _, gpu := range server.GPUs {
 			if !job.Resources.CapabilityMatches(gpu) {
 				continue
@@ -129,8 +125,6 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 		reason = "no server satisfies organization ownership"
 	case !online:
 		reason = "no online agent with fresh inventory (offline, drained or inventory unavailable)"
-	case !labels:
-		reason = "no server matches the requested labels"
 	case !model:
 		reason = "GPU model unavailable for performance profile / FP8 requirement"
 	case !healthy:
@@ -201,13 +195,4 @@ func freeGPUCount(server domain.Server) int {
 		}
 	}
 	return free
-}
-
-func labelsMatch(actual, requested map[string]string) bool {
-	for key, value := range requested {
-		if actual[key] != value {
-			return false
-		}
-	}
-	return true
 }

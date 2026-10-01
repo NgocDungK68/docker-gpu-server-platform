@@ -95,7 +95,7 @@ export function JobForm() {
           <Field label="Tên workload" error={errors.name?.message}><input className="field-input" {...register("name")} /></Field>
           <Field label="Docker image" error={errors.image?.message}><input className="field-input" {...register("image")} /></Field>
           <Field label="Command — mỗi đối số một dòng" error={errors.commandLines?.message} wide><textarea rows={3} className="field-textarea font-mono" {...register("commandLines")} /></Field>
-          <Field label="Environment — KEY=value mỗi dòng" error={errors.environmentLines?.message} wide><textarea rows={2} className="field-textarea font-mono" {...register("environmentLines")} /></Field>
+          <Field label="Biến môi trường container — KEY=value mỗi dòng" error={errors.environmentLines?.message} wide><textarea rows={2} className="field-textarea font-mono" {...register("environmentLines")} /></Field>
         </div>
       </Card>
       <Card>

@@ -167,3 +167,23 @@ func TestIdentityOwnsJobAndEnrollmentAndLogoutRevokesSession(t *testing.T) {
 		t.Fatal("logged-out session still accepted")
 	}
 }
+
+func TestEnrollmentRejectsArbitraryLabels(t *testing.T) {
+	for _, token := range []string{"user-session", "admin-session"} {
+		handler, metadata := identityHandler(t)
+		w := identityRequest(handler, "POST", "/api/v1/enrollments", token, []byte(`{"displayName":"demo","labels":{"site":"lab"}}`))
+		if w.Code != http.StatusBadRequest || metadata.enrollment.ID != "" {
+			t.Fatalf("user labels accepted: %d %s", w.Code, w.Body)
+		}
+		body := `{"displayName":"demo"}`
+		wantOrg := "own"
+		if token == "admin-session" {
+			body = `{"displayName":"demo","organizationId":"other"}`
+			wantOrg = "other"
+		}
+		w = identityRequest(handler, "POST", "/api/v1/enrollments", token, []byte(body))
+		if w.Code != http.StatusCreated || metadata.enrollment.OrganizationID != wantOrg || len(metadata.enrollment.Labels) != 0 {
+			t.Fatalf("label-free enrollment failed: %d %s", w.Code, w.Body)
+		}
+	}
+}

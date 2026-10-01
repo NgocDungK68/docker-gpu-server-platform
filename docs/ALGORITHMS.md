@@ -12,7 +12,7 @@ Giữ ownership giữa các đơn vị trong cùng logical pool, không cho prio
 
 ### Khi nào được gọi
 
-`prepareJob` nhận organization từ authenticated Principal. `matchJob` lọc trước recommendation; `Scheduler.filter` lọc trước readiness, labels, capability, health, count, VRAM và mọi scoring. `CommitAssignment` kiểm tra lại dưới runtime lock trước reserve.
+`prepareJob` nhận organization từ authenticated Principal. `matchJob` lọc trước recommendation; `Scheduler.filter` lọc trước readiness, capability, health, count, VRAM và mọi scoring. `CommitAssignment` kiểm tra lại dưới runtime lock trước reserve.
 
 ### Đầu vào
 
@@ -792,7 +792,7 @@ Tạo candidate gồm một server và tập GPU phù hợp, không ghép host.
 
 ### Đầu vào
 
-`Job.Resources`, legacy `Job.ServerSelector`, `[]Server`, `now`, OfflineAfter.
+`Job.Resources`, `[]Server`, `now`, OfflineAfter.
 
 ### Đầu ra
 
@@ -804,17 +804,17 @@ Hai lượt GPU trong `filter` phải phân biệt:
 
 | Bước theo source | Input / condition | Khi không qua | Source |
 |---|---|---|---|
+| 0. Organization | Job.OrganizationID phải bằng Server.OrganizationID | Skip server trước mọi filter/scoring | `filter` |
 | 1. Server readiness | Server.Schedulable(now, timeout), A09 | Skip server; no-online reason nếu không host nào qua | `filter`, `Server.Schedulable` |
-| 2. Legacy selector | Mọi requested key/value bằng server.Labels[key] | Skip server; no-labels reason | `labelsMatch` |
-| 3a. Diagnostic capability | ResourceRequest.CapabilityMatches(gpu) | Skip GPU trong lượt flags | `filter` |
-| 3b. Diagnostic health | gpu.Healthy | Skip GPU trong lượt flags | `filter` |
-| 3c. Diagnostic availability | Ghi external/unknown flags, rồi gpu.Schedulable | Không đánh dấu available nếu fail | `filter` |
-| 3d. Diagnostic VRAM | AvailableMemoryMiB ≥ MinVRAMMiB | Không đánh dấu vram nếu fail | `filter` |
-| 4. Tập GPU thực tế | Duyệt lại GPUs, `Matches` theo thứ tự GPUReady → capability → VRAM | Loại GPU khỏi matching | `matchingGPUs` |
-| 5. GPU order | AvailableMemoryMiB ↑ rồi UUID ↑ | Không có random/index preference | `matchingGPUs` |
-| 6. Count | len(matching) ≥ GPUCount | Không thêm candidate, count reason nếu flags đủ | `filter` |
+| 2a. Diagnostic capability | ResourceRequest.CapabilityMatches(gpu) | Skip GPU trong lượt flags | `filter` |
+| 2b. Diagnostic health | gpu.Healthy | Skip GPU trong lượt flags | `filter` |
+| 2c. Diagnostic availability | Ghi external/unknown flags, rồi gpu.Schedulable | Không đánh dấu available nếu fail | `filter` |
+| 2d. Diagnostic VRAM | AvailableMemoryMiB ≥ MinVRAMMiB | Không đánh dấu vram nếu fail | `filter` |
+| 3. Tập GPU thực tế | Duyệt lại GPUs, `Matches` theo thứ tự GPUReady → capability → VRAM | Loại GPU khỏi matching | `matchingGPUs` |
+| 4. GPU order | AvailableMemoryMiB ↑ rồi UUID ↑ | Không có random/index preference | `matchingGPUs` |
+| 5. Count | len(matching) ≥ GPUCount | Không thêm candidate, count reason nếu flags đủ | `filter` |
 
-Selector rỗng match mọi labels. Field này vẫn hoạt động với stored legacy Job; Create DTO mới không nhận selector. Map lookup key không tồn tại trả "", nên requested value="" cũng khớp missing key trong helper hiện tại.
+Phase C: Scheduler không đọc ServerSelector hoặc lọc server theo labels tùy ý. Field cũ trong domain được giữ để tương thích dữ liệu; public Create/Preview DTO không nhận selector. Labels nội bộ của managed container vẫn được giữ.
 
 Không có check selected GPUs cùng model, topology hoặc NVLink; từng GPU chỉ cần qua cùng ResourceRequest. Profile general có thể cho phép mixed model trên một host.
 
@@ -824,7 +824,7 @@ Không weighted score ở filtering. Candidate chỉ tồn tại khi đủ GPU m
 
 ### Pseudocode
 
-`for server: readiness + labels; diagnostic GPU pass; matching = sort(GPUs where Matches); if len(matching)>=GPUCount: append candidate`.
+`for server: organization + readiness; diagnostic GPU pass; matching = sort(GPUs where Matches); if len(matching)>=GPUCount: append candidate`.
 
 ### Ví dụ
 
@@ -832,11 +832,11 @@ Request 2 GPU: server A có 1 phù hợp, B có 1 phù hợp → không candidat
 
 ### Complexity
 
-O(SL + Σ(G_i(1+R) + M_i log M_i)) cho filtering/sort theo quy ước; diagnostic và matching đều quét GPU. Không tính repository snapshot cloning.
+O(S + Σ(G_i(1+R) + M_i log M_i)) cho filtering/sort theo quy ước; diagnostic và matching đều quét GPU. Không tính repository snapshot cloning.
 
 ### Source mapping
 
-[internal/application/scheduler.go][scheduler] — `filter`, `labelsMatch`, `matchingGPUs`, `candidate`; [domain/allocation.go][allocation-model] — `Matches`.
+[internal/application/scheduler.go][scheduler] — `filter`, `matchingGPUs`, `candidate`; [domain/allocation.go][allocation-model] — `Matches`.
 
 ## A14 — Reason khi không đủ tài nguyên
 
@@ -1215,7 +1215,7 @@ Hai servers ONLINE, không drain, heartbeat/inventory receipt cách now1s. Tất
 | srv-a | GPU-A0 OCCUPIED_LEGACY; GPU-A1 FREE; GPU-A2 FREE; GPU-A3 OCCUPIED_UNKNOWN | GPU-A1, GPU-A2: M=2 |
 | srv-b | GPU-B0 FREE; GPU-B1 FREE; GPU-B2 FREE; GPU-B3 FREE | GPU-B0..B3: M=4 |
 
-**Filtering:** cả hai servers qua readiness/labels. Capability resolve A100 aliases; FP8=false không thêm FP8 restriction. A0/A3 bị GPU.Schedulable loại bất kể VRAM; những GPU còn lại qua model/health/VRAM. Mỗi host có ít nhất2 matching GPU nên đều là candidates.
+**Filtering:** cả hai servers qua organization/readiness. Capability resolve A100 aliases; FP8=false không thêm FP8 restriction. A0/A3 bị GPU.Schedulable loại bất kể VRAM; những GPU còn lại qua model/health/VRAM. Mỗi host có ít nhất2 matching GPU nên đều là candidates.
 
 **GPU subset:** available VRAM bằng nhau nên UUID phá hòa. A chọn [GPU-A1,GPU-A2]; B chọn [GPU-B0,GPU-B1].
 
@@ -1247,7 +1247,7 @@ Paths dưới đây thuộc backend `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-d
 | A10 — occupancy input | [internal/agent/inventory.go][inventory]; [gpu/nvml_linux.go][nvml]; [agent/config/config.go][agent-config] | Snapshot, InventoryPolicy, Reader.Snapshot, Load | ACTIVE |
 | A11 — resource accounting | [internal/store/memory/accounting.go][accounting]; [store.go][store] | normalizeGPUState, ReplaceInventory | ACTIVE |
 | A12 — GPU filters | [internal/domain/model.go][model]; [allocation.go][allocation-model] | GPU.Schedulable, AvailableMemoryMiB, Matches | ACTIVE |
-| A13 — candidates | [internal/application/scheduler.go][scheduler] | filter, matchingGPUs, labelsMatch | ACTIVE |
+| A13 — candidates | [internal/application/scheduler.go][scheduler] | filter, matchingGPUs | ACTIVE |
 | A14 — no-candidate reasons | [internal/application/scheduler.go][scheduler]; [allocation.go][allocation-app] | filter, planReservations, matchJob | ACTIVE |
 | A15 — First Fit | [internal/application/scheduler.go][scheduler] | NewScheduler, StrategyFirstFit scorer | ACTIVE |
 | A16 — Best Fit | [internal/application/scheduler.go][scheduler] | NewScheduler, StrategyBestFit scorer | ACTIVE |

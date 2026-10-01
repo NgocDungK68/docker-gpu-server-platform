@@ -170,7 +170,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"displayName\": \"Postman demo server\",\n  \"labels\": {\n    \"purpose\": \"demo\"\n  }\n}",
+              "raw": "{\n  \"displayName\": \"Postman demo server\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -841,7 +841,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"displayName\": \"Postman selected unit server\",\n  \"organizationId\": \"{{managed_organization_id}}\",\n  \"labels\": {\n    \"purpose\": \"demo\"\n  }\n}",
+              "raw": "{\n  \"displayName\": \"Postman selected unit server\",\n  \"organizationId\": \"{{managed_organization_id}}\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -2245,7 +2245,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"displayName\": \"Postman protocol fixture\",\n  \"labels\": {\n    \"purpose\": \"protocol-test\"\n  }\n}",
+              "raw": "{\n  \"displayName\": \"Postman protocol fixture\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

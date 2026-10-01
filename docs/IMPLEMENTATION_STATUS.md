@@ -1,3 +1,93 @@
+# CURRENT PHASE — Phase C: Remove arbitrary labels + Header polish (01/10/2026)
+
+Baseline: `81e5e5f`. Working tree sạch khi bắt đầu; giữ nguyên Phase A WORKING và Phase B DONE.
+
+## DONE
+
+- Enrollment UI/API không nhận labels tùy ý; request chứa labels trả HTTP 400. ADMIN chọn đơn vị, user thường kế thừa organization từ identity.
+- Bỏ phần nhãn trên danh sách/detail máy chủ và tìm kiếm theo nhãn. Scheduler bỏ ServerSelector/labelsMatch, không sửa strategy, organization constraint, capability hay time-planning.
+- Container environment variables vẫn được gửi nguyên vẹn, gồm giá trị rỗng và dấu bằng. Giữ internal ownership/correlation labels aiwm.managed, aiwm.job-id.
+- Header Tổng quan gọn: title “Tổng quan tài nguyên GPU”, subtitle/phạm vi và thời điểm cập nhật, bộ lọc đơn vị tìm kiếm được + Làm mới.
+- ADMIN mặc định Toàn hệ thống, pill admin; VTT thấy Viettel Telecom · VTT, pill VTT, không có bộ lọc cross-org.
+- Shared PageHeader có style thống nhất; topbar giữ breadcrumb, trạng thái “Đã kết nối”, Tạo workload, account và Đăng xuất; bố cục mobile đã kiểm tra.
+- Chỉ dọn text tại các màn được chạm tới. Form capability/Training/Inference/lịch sử dụng không đổi.
+- Cập nhật demo enrollment client, ba request Postman và OpenAPI để không còn gửi labels bị từ chối.
+
+## PARTIAL
+
+- Không còn hạng mục dở dang trong Phase C + Header.
+- Domain/metadata fields labels cũ vẫn được giữ để tương thích; không migrate dữ liệu hoặc sửa Agent/persistence.
+- Browser tests dùng API fixtures; không chạy full Docker E2E hoặc rebuild demo stack trong phase này.
+- PostgreSQL runtime repository/Prometheus và các phase sau chưa bắt đầu.
+
+## TESTS
+
+- PASS: focused Go tests application/httpapi — enrollment validation/ownership; scheduler bỏ selector; cả bốn strategy; capability/health; org isolation; no early execution; overlap/policy; start/end/revalidation; internal labels + ENV trong START payload.
+- PASS: frontend typecheck; ESLint trực tiếp các TS/TSX đã đổi.
+- PASS: 12 tests trong tests/contracts.test.mjs.
+- PASS: 5 Playwright Edge checks — admin/filter/mobile, VTT context, form/ENV, enrollment admin, enrollment VTT. Ảnh desktop/mobile đã kiểm tra.
+- PASS: Python AST cho scripts/demo.py, JSON Postman, git diff --check.
+- Lần đầu Go test bị sandbox chặn cache; rerun được phép đã PASS. Browser assertion ban đầu đọc cả option ẩn đã sửa để kiểm tra subtitle hiển thị; lượt cuối 5/5 PASS.
+- Next dev cổng 3100 phục vụ test đã dừng; không dừng/xóa Docker resources.
+
+## VERIFIED COMMANDS
+
+Trong BACKEND:
+```bash
+go test ./internal/application ./internal/httpapi -run 'Test(LegacyUserLabels|DispatchPreserves|EnrollmentRejects|IdentityOwns|SessionAuthorizes|RegistrationTakes|AllocationContract|AllPolicies|SchedulerFilters|InjectedPlacement|OrganizationFilter|BestFitExcludes|PlanRejects|FutureReservation|ReservationIntervals|PlanningOrganization|ExecutionRevalidates|ReservationEnd|TimeAwarePreview)' -count=1
+```
+
+Trong FRONTEND:
+```powershell
+npm.cmd run typecheck
+node --experimental-strip-types --test tests/contracts.test.mjs
+node node_modules/eslint/bin/eslint.js "src/app/(console)/page.tsx" "src/app/(console)/onboarding/page.tsx" "src/app/(console)/servers/page.tsx" "src/app/(console)/servers/[serverId]/page.tsx" src/components/layout/topbar.tsx src/components/ui/page.tsx src/components/workloads/job-form.tsx src/features/dashboard/use-dashboard.ts src/features/identity/organization-context.tsx src/features/identity/organization-select.tsx src/lib/api/identity.ts tests/e2e/fleet-capability.spec.ts
+npm.cmd run dev -- --hostname 127.0.0.1 --port 3100
+# Terminal riêng khi dev server đã sẵn sàng:
+$env:AIWM_CONSOLE_URL='http://127.0.0.1:3100'
+$env:AIWM_BROWSER_CHANNEL='msedge'
+npm.cmd run test:e2e -- tests/e2e/fleet-capability.spec.ts -g 'admin has global|organization dashboard|four capability|enrollment has no'
+```
+
+## FILES CHANGED
+
+BACKEND = `AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane`; FRONTEND = `AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console`.
+
+- `FRONTEND/src/app/(console)/onboarding/page.tsx`
+- `FRONTEND/src/app/(console)/page.tsx`
+- `FRONTEND/src/app/(console)/servers/[serverId]/page.tsx`
+- `FRONTEND/src/app/(console)/servers/page.tsx`
+- `FRONTEND/src/app/globals.css`
+- `FRONTEND/src/components/layout/topbar.tsx`
+- `FRONTEND/src/components/ui/page.tsx`
+- `FRONTEND/src/components/workloads/job-form.tsx`
+- `FRONTEND/src/features/dashboard/use-dashboard.ts`
+- `FRONTEND/src/features/identity/organization-context.tsx`
+- `FRONTEND/src/features/identity/organization-select.tsx`
+- `FRONTEND/src/lib/api/identity.ts`
+- `FRONTEND/tests/contracts.test.mjs`
+- `FRONTEND/tests/e2e/fleet-capability.spec.ts`
+- `BACKEND/api/openapi.yaml`
+- `BACKEND/internal/application/identity.go`
+- `BACKEND/internal/application/labels_contract_test.go`
+- `BACKEND/internal/application/scheduler.go`
+- `BACKEND/internal/application/scheduler_safety_test.go`
+- `BACKEND/internal/application/scheduler_test.go`
+- `BACKEND/internal/httpapi/identity_test.go`
+- `README.md`
+- `docs/ALGORITHMS.md`
+- `docs/API_TESTING_POSTMAN.md`
+- `docs/IMPLEMENTATION_STATUS.md`
+- `docs/TRACEABILITY.md`
+- `postman/AIWM.postman_collection.json`
+- `scripts/demo.py`
+
+## NEXT STEP
+
+Phase D — PostgreSQL adapter cho toàn bộ ports.Repository, bắt đầu từ interface ports.Repository và runtime-store wiring. Chưa thực hiện trong phiên Phase C này.
+
+---
+
 # CURRENT PHASE — B: Workloads UI (25/09/2026)
 
 ## PHASE A VERIFIED

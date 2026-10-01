@@ -41,7 +41,7 @@ scripts/configure.py giữ giá trị cũ, sinh credentials local khi thiếu; k
 ## Demo các chức năng trong scope
 
 1. ADMIN tạo organization/user; VTT, VTNET, VDS chỉ là metadata có thể thay đổi. Login user từng đơn vị để kiểm tra context.
-2. Tạo enrollment cho server; Agent tự discovery GPUs. Không nhập GPU thủ công. A100 mock có 4 GPUs, GPU 0 External; T4 mock có 2 GPUs. Số liệu user thấy tùy ownership enrollment.
+2. Tạo enrollment bằng tên máy chủ và đơn vị (ADMIN); không nhập labels tùy ý. Agent tự discovery GPUs. Không nhập GPU thủ công. A100 mock có 4 GPUs, GPU 0 External; T4 mock có 2 GPUs. Số liệu user thấy tùy ownership enrollment.
 3. Dashboard/Servers/GPUs/Jobs scope tại backend. ADMIN có bộ lọc organization; normal user không được đổi scope bằng query/body.
 4. Preview/submit workload TRAINING hoặc INFERENCE: khai báo nhu cầu, không chọn server/GPU/strategy. Job chỉ placement trong organization của account; ADMIN submit cũng dùng home organization.
 5. Stop Job do AIWM quản lý; inventory terminal → release; External giữ nguyên. FREE chỉ khi không còn blocker.

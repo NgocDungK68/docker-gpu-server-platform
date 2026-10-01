@@ -16,7 +16,8 @@ test("same-origin mutation works for inbound localhost and IP hosts, rejects for
 test("intent input preserves empty environment and omits placement controls", () => {
  assert.equal(jobFormSchema.safeParse(valid).success, true);
  assert.deepEqual(parseKeyValueLines("EMPTY=\nURL=a=b"), { EMPTY: "", URL: "a=b" });
- const input=allocationInput({...valid,ttlHours:1.5});
+ const input=allocationInput({...valid,ttlHours:1.5,environmentLines:"EMPTY=\nURL=a=b\nAPP_MODE=training"});
+ assert.deepEqual(input.environment,{EMPTY:"",URL:"a=b",APP_MODE:"training"});
  assert.equal(input.ttlSeconds,5400);
  assert.match(input.neededAt,/Z$/);
  for (const field of ["priority","strategy","serverSelector"]) {

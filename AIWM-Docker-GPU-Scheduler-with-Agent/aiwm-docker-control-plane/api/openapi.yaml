@@ -1624,15 +1624,6 @@ components:
           type: "string"
           minLength: 1
           maxLength: 200
-        labels:
-          type: "object"
-          maxProperties: 32
-          additionalProperties:
-            type: "string"
-            maxLength: 256
-          propertyNames:
-            minLength: 1
-            maxLength: 64
         organizationId:
           type: "string"
           description: "Chỉ ADMIN được gửi; nếu bỏ qua dùng organization của account. ORGANIZATION_USER gửi field có giá trị bị 403."

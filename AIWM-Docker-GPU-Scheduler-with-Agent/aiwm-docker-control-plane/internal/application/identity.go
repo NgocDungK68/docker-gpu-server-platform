@@ -151,7 +151,6 @@ func (s *IdentityService) Bootstrap(ctx context.Context,code,name,username,passw
 
 type EnrollmentInput struct {
 	DisplayName string `json:"displayName"`
-	Labels map[string]string `json:"labels"`
 	OrganizationID string `json:"organizationId,omitempty"`
 }
 
@@ -167,12 +166,11 @@ func (s *IdentityService) CreateEnrollment(ctx context.Context,input EnrollmentI
 	if p.User.Role!=domain.RoleAdmin && input.OrganizationID!="" { return EnrollmentResult{},domain.ErrForbidden }
 	o,err:=s.Metadata.GetOrganization(ctx,orgID); if err!=nil { return EnrollmentResult{},err }; if !o.Enabled { return EnrollmentResult{},domain.ErrConflict }
 	input.DisplayName=strings.TrimSpace(input.DisplayName)
-	if input.DisplayName=="" || len(input.DisplayName)>200 || len(input.Labels)>32 { return EnrollmentResult{},domain.ErrInvalidInput }
-	for key,value:=range input.Labels { if len(key)==0 || len(key)>64 || len(value)>256 { return EnrollmentResult{},domain.ErrInvalidInput } }
+	if input.DisplayName=="" || len(input.DisplayName)>200 { return EnrollmentResult{},domain.ErrInvalidInput }
 	id,err:=newID("enr"); if err!=nil { return EnrollmentResult{},err }
 	serverID,err:=newID("srv"); if err!=nil { return EnrollmentResult{},err }
 	token,err:=randomToken(32); if err!=nil { return EnrollmentResult{},err }
-	e:=domain.Enrollment{ID:id,ServerID:serverID,OrganizationID:orgID,DisplayName:input.DisplayName,Labels:input.Labels,TokenHash:tokenHash(token),ExpiresAt:time.Now().UTC().Add(24*time.Hour)}
+	e:=domain.Enrollment{ID:id,ServerID:serverID,OrganizationID:orgID,DisplayName:input.DisplayName,TokenHash:tokenHash(token),ExpiresAt:time.Now().UTC().Add(24*time.Hour)}
 	if err=s.Metadata.CreateEnrollment(ctx,e); err!=nil { return EnrollmentResult{},err }
 	return EnrollmentResult{Enrollment:e,EnrollmentToken:token},nil
 }

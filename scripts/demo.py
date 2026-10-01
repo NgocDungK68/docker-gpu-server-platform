@@ -136,7 +136,7 @@ def seed(catalog, servers, set_demo_passwords=False):
                 continue
             if machine in known or config.get(key):
                 raise RuntimeError("Thiếu metadata/token local khớp server cũ; không đổi ownership: " + machine)
-            e = api("/enrollments", {"displayName": machine, "organizationId": org["id"], "labels": {"pool": "multi-server-demo"}})
+            e = api("/enrollments", {"displayName": machine, "organizationId": org["id"]})
             set_values(ROOT / ".env", {key: e["enrollmentToken"], key + "_ID": e["id"]})
         print("Đã chuẩn bị accounts/enrollments; không in token.", flush=True)
     finally:

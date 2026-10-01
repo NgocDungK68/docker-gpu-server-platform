@@ -59,3 +59,18 @@ func gpu(uuid string, state domain.GPUState) domain.GPU {
 		Healthy: true, State: state,
 	}
 }
+
+func TestLegacyUserLabelsDoNotConstrainPlacement(t *testing.T) {
+	now := time.Now().UTC()
+	job := domain.Job{OrganizationID: "own", ServerSelector: map[string]string{"site": "old-selector"}, Resources: domain.ResourceRequest{GPUCount: 1}}
+	servers := []domain.Server{
+		{ID: "foreign", OrganizationID: "other", Labels: job.ServerSelector, Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("foreign", domain.GPUFree)}},
+		{ID: "own", OrganizationID: "own", Labels: map[string]string{"site": "different"}, Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("own", domain.GPUFree)}},
+	}
+	for _, strategy := range []domain.SchedulingStrategy{domain.StrategyFirstFit, domain.StrategyBestFit, domain.StrategyBinPack, domain.StrategyFragmentation} {
+		placement, err := NewScheduler(strategy, time.Minute).Plan(job, servers, now)
+		if err != nil || placement.ServerID != "own" {
+			t.Fatalf("%s: placement=%+v err=%v", strategy, placement, err)
+		}
+	}
+}

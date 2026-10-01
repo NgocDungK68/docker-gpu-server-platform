@@ -52,7 +52,6 @@ func TestSchedulerFiltersAndPendingReasons(t *testing.T) {
 		{"external", "external workload", func(s *domain.Server, _ *domain.Job) { s.GPUs[0].State = domain.GPUOccupiedLegacy }},
 		{"unknown", "ownership unknown", func(s *domain.Server, _ *domain.Job) { s.GPUs[0].State = domain.GPUOccupiedUnknown }},
 		{"reserved", "reserved or allocated", func(s *domain.Server, _ *domain.Job) { s.GPUs[0].State = domain.GPUReserved }},
-		{"selector", "labels", func(_ *domain.Server, j *domain.Job) { j.ServerSelector = map[string]string{"site": "other"} }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

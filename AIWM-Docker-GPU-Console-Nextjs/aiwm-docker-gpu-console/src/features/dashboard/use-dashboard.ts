@@ -8,7 +8,7 @@ import { queryKeys } from "@/lib/api/query-keys";
 import { appConfig } from "@/config/app";
 
 export function useDashboard() {
-  const { user, organizationFilter } = useSession();
+  const { user, organization, organizationFilter } = useSession();
   const admin = user.role === "ADMIN";
   const servers = useQuery({
     queryKey: [...queryKeys.servers, organizationFilter],
@@ -18,6 +18,9 @@ export function useDashboard() {
   const organizations = useQuery({ queryKey: ["organizations"], queryFn: identityApi.organizations, enabled: admin });
   return {
     admin,
+    organization,
+    organizationFilter,
+    updatedAt: servers.dataUpdatedAt,
     servers: servers.data ?? [],
     organizations: (organizations.data ?? []).filter(o => !organizationFilter || o.id === organizationFilter),
     isLoading: servers.isPending || (admin && organizations.isPending),

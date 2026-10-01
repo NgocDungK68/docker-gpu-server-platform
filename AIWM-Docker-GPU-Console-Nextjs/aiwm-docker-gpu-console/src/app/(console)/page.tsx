@@ -9,18 +9,25 @@ import { ErrorState, PageHeader, TableSkeleton } from "@/components/ui/page";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { useDashboard } from "@/features/dashboard/use-dashboard";
 import { fleetMetrics } from "@/features/dashboard/fleet";
+import { OrganizationFilter } from "@/features/identity/organization-context";
 
 const percent = (value: number | null) => value === null ? "—" : value.toLocaleString("vi-VN", { maximumFractionDigits: 1 }) + "%";
 
 export default function DashboardPage() {
   const dashboard = useDashboard();
   const metrics = fleetMetrics(dashboard.servers);
+  const selectedOrganization = dashboard.admin ? dashboard.organizations.find(org => org.id === dashboard.organizationFilter) : dashboard.organization;
+  const context = selectedOrganization ? selectedOrganization.name + " · " + selectedOrganization.code : dashboard.organizationFilter ? "Đơn vị đã chọn" : "Toàn hệ thống";
+  const metadata = [context,
+    ...(dashboard.admin && !dashboard.organizationFilter && !dashboard.isLoading && !dashboard.error ? [dashboard.organizations.length + " đơn vị"] : []),
+    ...(dashboard.updatedAt ? ["cập nhật lúc " + new Date(dashboard.updatedAt).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" })] : []),
+  ].join(" · ");
   const rows = dashboard.admin
     ? dashboard.organizations.map(org => ({ id: org.id, name: org.code, detail: org.name, stats: fleetMetrics(dashboard.servers.filter(s => s.organizationId === org.id)), server: undefined }))
     : dashboard.servers.map(server => ({ id: server.id, name: server.name, detail: "", stats: fleetMetrics([server]), server }));
 
   return <>
-    <PageHeader title="Tổng quan tài nguyên" actions={<Button variant="secondary" onClick={() => void dashboard.refetch()} disabled={dashboard.isLoading}><RefreshCw className="size-4" />Làm mới</Button>} />
+    <PageHeader title="Tổng quan tài nguyên GPU" description={metadata} actions={<><OrganizationFilter /><Button variant="secondary" onClick={() => void dashboard.refetch()} disabled={dashboard.isLoading}><RefreshCw className="size-4" />Làm mới</Button></>} />
     {dashboard.error ? <ErrorState message={dashboard.error.message} onRetry={dashboard.refetch} />
       : dashboard.isLoading ? <TableSkeleton rows={8} /> : <div className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

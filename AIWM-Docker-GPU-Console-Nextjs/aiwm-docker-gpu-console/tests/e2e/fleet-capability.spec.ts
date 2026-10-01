@@ -10,7 +10,7 @@ const gpu = (uuid: string, utilizationPct: number, state = "FREE") => ({
 const servers = [
   { id: "s1", organizationId: "vtt", name: "vtt-gpu-01", gpus: [gpu("g1", 20), gpu("g2", 60, "ALLOCATED")] },
   { id: "s2", organizationId: "vds", name: "vds-gpu-01", gpus: [gpu("g3", 80)] },
-].map(s => ({ ...s, status: "ONLINE", schedulable: true, inventoryReceivedAt: new Date().toISOString(), lastHeartbeatAt: new Date().toISOString(), containers: [], host: {}, labels: {} }));
+].map(s => ({ ...s, status: "ONLINE", schedulable: true, inventoryReceivedAt: new Date().toISOString(), lastHeartbeatAt: new Date().toISOString(), containers: [], host: {}, labels: { site: "old-label-marker" } }));
 const job = {
   id: "job-test", name: "Training demo", organizationId: "vtt", status: "ASSIGNED",
   image: "alpine:3.21", resources: { gpuCount: 1, minVramMiB: 1024, performanceProfile: "AUTO" },
@@ -35,7 +35,7 @@ async function setup(page: Page, username: "admin" | "vtt") {
   await page.route("**/api/**", async route => {
     const path = new URL(route.request().url()).pathname;
     let data: unknown;
-    if (path.endsWith("/health")) return route.fulfill({ json: { status: "ok" } });
+    if (path.endsWith("/aiwm-health")) return route.fulfill({ json: { status: "ok" } });
     if (path.endsWith("/auth/login") || path.endsWith("/auth/me")) data = { user: { username, role: admin ? "ADMIN" : "ORGANIZATION_USER", organizationId: "vtt" }, organization: organizations[0] };
     else if (path.endsWith("/organizations")) data = organizations;
     else if (path.endsWith("/users") || path.endsWith("/enrollments")) data = [];
@@ -68,18 +68,46 @@ async function setup(page: Page, username: "admin" | "vtt") {
 
 test("admin has global fleet, organization utilization and shared account context", async ({ page }) => {
   await setup(page, "admin");
+  await expect(page.getByRole("heading", { name: "Tổng quan tài nguyên GPU" })).toBeVisible();
+  const header = page.locator("main .page-header");
+  await expect(header).toContainText("Toàn hệ thống · 2 đơn vị");
+  await expect(header.locator("p").first()).not.toContainText("Viettel Telecom");
+  await expect(page.locator("header.sticky").getByText("Đã kết nối", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Lọc theo đơn vị")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Hiệu suất theo đơn vị" })).toBeVisible();
   await expect(page.getByRole("row").filter({ hasText: "VTT" })).toContainText("40%");
   await expect(page.getByRole("row").filter({ hasText: "VDS" })).toContainText("80%");
   await expect(page.getByText("53,3%", { exact: true })).toBeVisible();
   for (const text of ["Đơn vị của tài khoản", "admin · ADMIN", "Workload gần đây", "Sự kiện job gần đây", "Bộ lọc chỉ áp dụng"]) await expect(page.getByText(text, { exact: false })).toHaveCount(0);
+  await page.getByLabel("Lọc theo đơn vị").click();
+  await page.getByLabel("Tìm đơn vị theo mã hoặc tên").fill("VDS");
+  await page.getByRole("button", { name: "VDS Viettel Digital Services" }).click();
+  await expect(header).toContainText("Viettel Digital Services · VDS");
+  await expect(page.getByRole("row").filter({ hasText: "VTT" })).toHaveCount(0);
+  await expect(page.getByLabel("Tài khoản hiện tại")).toHaveText("admin");
+  await page.getByLabel("Lọc theo đơn vị").click();
+  await page.getByRole("button", { name: "Tất cả đơn vị", exact: true }).click();
+  await expect(header).toContainText("Toàn hệ thống · 2 đơn vị");
+  await page.screenshot({ path: "test-results/header-admin.png" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByLabel("Lọc theo đơn vị")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(page.locator("header.sticky").getByRole("link", { name: "Tạo workload" })).toBeHidden();
+  await page.screenshot({ path: "test-results/header-admin-mobile.png", animations: "disabled" });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   await page.goto("/servers");
+  await expect(page.getByRole("columnheader", { name: "Nhãn", exact: true })).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText("old-label-marker");
   await expect(page.getByLabel("Tài khoản hiện tại")).toHaveText("admin");
   await expect(page.getByRole("link", { name: "vds-gpu-01", exact: true })).toBeVisible();
 });
 
 test("organization dashboard has only its fleet and a fixed organization identity", async ({ page }) => {
   await setup(page, "vtt");
+  await expect(page.getByRole("heading", { name: "Tổng quan tài nguyên GPU" })).toBeVisible();
+  await expect(page.locator("main .page-header")).toContainText("Viettel Telecom · VTT");
+  await expect(page.getByLabel("Lọc theo đơn vị")).toHaveCount(0);
+  await page.screenshot({ path: "test-results/header-vtt.png" });
   await expect(page.getByRole("heading", { name: "Tài nguyên theo máy chủ" })).toBeVisible();
   await expect(page.getByRole("link", { name: "vtt-gpu-01", exact: true })).toBeVisible();
   await expect(page.getByText("40%", { exact: true }).first()).toBeVisible();
@@ -95,7 +123,8 @@ test("four capability inputs auto-preview, debounce and keep execution/time fiel
   await page.goto("/workloads/new");
   await expect(page.getByLabel("Docker image")).toBeVisible();
   await expect(page.getByLabel("Command — mỗi đối số một dòng")).toBeVisible();
-  await expect(page.getByLabel("Environment — KEY=value mỗi dòng")).toBeVisible();
+  await expect(page.getByLabel("Biến môi trường container — KEY=value mỗi dòng")).toBeVisible();
+  await expect(page.getByLabel(/Nhãn|Environment label|Server selector|Label selector/i)).toHaveCount(0);
   await expect(page.getByLabel(/CPU|RAM \(MiB\)|GPU model|strategy|UUID/i)).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Đối chiếu|Kiểm tra khả năng|Preview/ })).toHaveCount(0);
   await expect(page.getByLabel("Profile hiệu năng").locator("option")).toHaveText(["Chọn…", "Auto", "Hiệu năng cao"]);
@@ -107,6 +136,8 @@ test("four capability inputs auto-preview, debounce and keep execution/time fiel
   const local = new Date(start.getTime() - start.getTimezoneOffset()*60000).toISOString().slice(0,16);
   await page.getByLabel("Thời điểm bắt đầu", { exact: false }).fill(local);
   await expect(page.getByText("Có tài nguyên phù hợp", { exact: true })).toBeVisible();
+  await page.getByLabel("Biến môi trường container — KEY=value mỗi dòng").fill("APP_MODE=training\nEMPTY=\nURL=a=b");
+  await expect.poll(() => previews.at(-1)?.environment).toEqual({ APP_MODE: "training", EMPTY: "", URL: "a=b" });
   const before = previews.length;
   await page.getByLabel("Số GPU", { exact: true }).fill("2");
   await page.getByLabel("Số GPU", { exact: true }).fill("3");
@@ -135,3 +166,29 @@ test("operator pages omit developer notes while preserving business actions", as
   }
   expect(errors).toEqual([]);
 });
+
+for (const username of ["admin", "vtt"] as const) {
+  test("enrollment has no arbitrary labels for " + username, async ({ page }) => {
+    await setup(page, username);
+    const requests: Record<string, unknown>[] = [];
+    await page.route("**/api/**/enrollments", async route => {
+      if (route.request().method() !== "POST") return route.fulfill({ json: { data: [] } });
+      const body = route.request().postDataJSON();
+      requests.push(body);
+      return route.fulfill({ status: 201, json: { data: { ...body, enrollmentToken: "fixture-enrollment-only", expiresAt: new Date(Date.now() + 86400000).toISOString() } } });
+    });
+    await page.goto("/onboarding");
+    await expect(page.getByRole("heading", { name: "Kết nối máy chủ", exact: true })).toBeVisible();
+    await expect(page.getByLabel(/Nhãn|Labels|key=value/i)).toHaveCount(0);
+    await page.getByLabel("Tên máy chủ", { exact: true }).fill("GPU demo");
+    if (username === "admin") await page.getByRole("combobox", { name: "Đơn vị", exact: true }).selectOption("vds");
+    else await expect(page.getByRole("combobox", { name: "Đơn vị", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Tạo mã kết nối", exact: true }).click();
+    await expect(page.getByText("fixture-enrollment-only")).toBeVisible();
+    expect(requests).toEqual([{ displayName: "GPU demo", ...(username === "admin" ? { organizationId: "vds" } : {}) }]);
+    await expect(page.locator("main")).not.toContainText(/scheduler|reconciliation|NVML|aiwm.managed|heartbeat|MinIO|presigned/i);
+    await page.goto("/servers/s1");
+    await expect(page.getByRole("heading", { name: "Nhãn máy chủ" })).toHaveCount(0);
+    await expect(page.locator("main")).not.toContainText("old-label-marker");
+  });
+}

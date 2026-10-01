@@ -18,6 +18,6 @@ export const identityApi = {
   users: () => request<User[]>("/users"),
   saveUser: (input: UserInput, id?: string) => post<User>(`/users${id ? `/${encodeURIComponent(id)}` : ""}`, input),
   enrollments: () => request<Enrollment[]>("/enrollments"),
-  createEnrollment: (input: { displayName: string; labels: Record<string,string>; organizationId?: string }) => post<EnrollmentResult>("/enrollments",input),
+  createEnrollment: (input: { displayName: string; organizationId?: string }) => post<EnrollmentResult>("/enrollments",input),
   revokeEnrollment: (id: string) => post<{ revoked: boolean }>(`/enrollments/${encodeURIComponent(id)}/revoke`),
 };

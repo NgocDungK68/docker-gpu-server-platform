@@ -9,6 +9,7 @@ Các mục này mới được kiểm tra tĩnh, **chưa chạy** test/build/mig
 | Scope | Implementation / source | Kiểm thử được bổ sung hoặc cách kiểm tra |
 |---|---|---|
 | Organization/session auth | domain/organization.go; application/identity.go; httpapi/identity.go; store/postgres | application/identity_test.go: login, enabled identity, session hash; httpapi/identity_test.go: session scope, spoofing, logout |
+| Bỏ labels tùy ý | EnrollmentInput không nhận labels; Scheduler bỏ ServerSelector cũ; giữ labels container nội bộ | httpapi/identity_test.go: TestEnrollmentRejectsArbitraryLabels; application/scheduler_test.go: TestLegacyUserLabelsDoNotConstrainPlacement |
 | Enrollment ownership | MetadataRepository.BindEnrollment; postgres transaction; ControlPlane.RegisterAgent | application/identity_test.go: không lấy name/labels/organization từ Agent; Postman Organization - Protocol nội bộ |
 | Hard filter trước scoring | application/scheduler.go; application/allocation.go | TestOrganizationFilterPrecedesScoringForEveryStrategy; fixture benchmark cùng organization |
 | Atomic commit và stale/reconnect | memory.CommitAssignment / Heartbeat / LeaseCommands | safety_test.go: conflict ownership không mutation; heartbeat không release/resume START trước inventory |

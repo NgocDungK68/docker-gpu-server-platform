@@ -73,7 +73,7 @@ Session có TTL 8 giờ, hash lưu PostgreSQL; không JWT/refresh token. Passwor
 
 ## 3. Server Enrollment
 
-`POST /api/v1/enrollments` nhận displayName, labels; ORGANIZATION_USER **không gửi organizationId**, backend lấy từ account. ADMIN được gửi organizationId. GPU tự discovery, không có API nhập GPU thủ công.
+`POST /api/v1/enrollments` chỉ nhận displayName và organizationId (ADMIN); gửi labels bị 400; ORGANIZATION_USER **không gửi organizationId**, backend lấy từ account. ADMIN được gửi organizationId. GPU tự discovery, không có API nhập GPU thủ công.
 
 Response 201 gồm id/serverId/organizationId/displayName/labels/expiresAt và **enrollmentToken chỉ trả một lần**. Token hash lưu PostgreSQL. `GET /api/v1/enrollments` scope theo account, không trả token. `POST /api/v1/enrollments/{enrollmentID}/revoke` trả revoked=true; chặn register lại, không thu hồi Agent token đã cấp hoặc stop runtime.
 
