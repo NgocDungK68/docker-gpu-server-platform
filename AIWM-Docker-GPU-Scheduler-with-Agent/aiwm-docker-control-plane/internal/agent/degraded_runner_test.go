@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -93,5 +94,18 @@ func TestDegradedRunnerRegistersReportsAndHeartbeatsDespiteOutage(t *testing.T) 
 				t.Fatal("degraded state disrupted containers")
 			}
 		})
+	}
+}
+
+type unwritableState struct{}
+
+func (unwritableState) Load() (PersistentState, error) { return PersistentState{}, nil }
+func (unwritableState) Save(PersistentState) error     { return errors.New("permission denied") }
+
+func TestUnwritableStateRemainsFatalBeforeRegistration(t *testing.T) {
+	r := NewRunner(RunnerConfig{MachineID: "m"}, nil, nil, nil, unwritableState{}, nil, nil)
+	err := r.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "initialize writable agent state") {
+		t.Fatal("state failure treated as optional subsystem failure", err)
 	}
 }

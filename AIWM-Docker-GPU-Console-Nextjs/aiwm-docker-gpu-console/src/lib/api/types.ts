@@ -65,7 +65,33 @@ export interface Container {
   exitCode?: number;
 }
 
+export type OperatingMode = "FULL" | "GPU_OBSERVE_ONLY" | "DOCKER_OBSERVE_ONLY" | "DEGRADED";
+
+export interface ServerCapabilities {
+  agentOperational: boolean;
+  operatingMode: OperatingMode;
+  os: string;
+  architecture: string;
+  kernelVersion?: string;
+  cgroupMode?: string;
+  machineIdAvailable: boolean;
+  dockerAvailable: boolean;
+  dockerVersion?: string;
+  dockerApiVersion?: string;
+  dockerOs?: string;
+  gpuInventoryAvailable: boolean;
+  nvmlAvailable: boolean;
+  gpuCount: number;
+  nvidiaDriverVersion?: string;
+  cudaDriverVersion?: string;
+  nvidiaContainerSupport: boolean;
+  managedExecutionReady: boolean;
+  reasons: string[];
+}
+
 export interface Server {
+  capabilities?: ServerCapabilities;
+
   organizationId: string;
   schedulable: boolean;
   schedulingReason: string;

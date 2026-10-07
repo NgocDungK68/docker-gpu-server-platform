@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { EmptyState, ErrorState, PageHeader, TableSkeleton } from "@/components/ui/page";
+import { ServerMode } from "@/features/inventory/server-mode";
 import { useServers } from "@/features/inventory/use-inventory";
 import { relativeTime } from "@/lib/utils/format";
 
@@ -29,9 +30,9 @@ export default function ServersPage() {
             const active = server.containers.filter((container) => ["running", "paused", "restarting"].includes(container.state));
             return <tr key={server.id}>
               <td><Link href={"/servers/" + server.id} className="font-bold text-slate-950 hover:underline">{server.name}</Link><p className="font-mono text-xs text-slate-500">{server.address || server.host?.hostname || server.machineId}</p></td>
-              <td><Badge value={server.status} /><p className="mt-1 max-w-56 text-xs text-slate-500">{server.schedulable ? "Có thể nhận workload" : "Chưa nhận workload mới"}</p></td>
+              <td><Badge value={server.status} /><div className="mt-1"><ServerMode mode={server.capabilities?.operatingMode} /></div><p className="mt-1 max-w-56 text-xs text-slate-500">{server.schedulable ? "Có thể nhận workload" : "Chưa nhận workload mới"}</p></td>
               <td><b>{free}/{server.gpus.length}</b><p className="text-xs text-slate-500">{[...new Set(server.gpus.map((gpu) => gpu.model))].join(", ")}</p></td>
-              <td><p>{active.filter((container) => container.origin === "MANAGED").length} Do AIWM quản lý</p><p>{active.filter((container) => container.origin !== "MANAGED").length} Có sẵn trên máy</p></td>
+              <td>{server.capabilities?.dockerAvailable && server.status !== "OFFLINE" ? <><p>{active.filter((container) => container.origin === "MANAGED").length} Do AIWM quản lý</p><p>{active.filter((container) => container.origin !== "MANAGED").length} Có sẵn trên máy</p></> : <span className="text-slate-400">Chưa có dữ liệu</span>}</td>
               <td><p>{relativeTime(server.lastHeartbeatAt)}</p><p className="text-xs text-slate-500">{relativeTime(server.inventoryReceivedAt)}</p></td>
             </tr>;
           })}</tbody></table></div>}

@@ -65,6 +65,10 @@ func (r *Runner) Run(ctx context.Context) error {
 		loaded.ProcessedCommands = make(map[string]CommandResult)
 	}
 	loaded.MachineID = r.config.MachineID
+	// Identity storage is required even when observation subsystems are unavailable.
+	if err := r.state.Save(loaded); err != nil {
+		return fmt.Errorf("initialize writable agent state: %w", err)
+	}
 	r.mu.Lock()
 	r.persistent = loaded
 	r.mu.Unlock()

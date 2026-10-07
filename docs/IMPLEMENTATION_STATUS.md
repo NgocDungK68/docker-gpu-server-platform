@@ -2,7 +2,7 @@
 Agent capability discovery + graceful degraded mode (07/10/2026)
 
 ## LAST WORKING CHECKPOINT
-Baseline: 41ffaf5. PHASE 4: safe partial inventory + dynamic capability + execution gate đã PASS.
+Baseline: 41ffaf5. Backend checkpoint: 0dc9b8c. PHASE 4: safe partial inventory + dynamic capability + execution gate đã PASS.
 
 ## DONE
 - Model platform.Capabilities tách AgentOperational, nguồn inventory và ManagedExecutionReady; bốn OperatingMode.
@@ -20,11 +20,14 @@ Baseline: 41ffaf5. PHASE 4: safe partial inventory + dynamic capability + execut
 - Server.Schedulable, scheduler filter và atomic commit chặn capability thiếu/unready; không sửa placement score.
 - API detail giữ organization authorization; capability lưu qua durable restart nhưng startup vẫn offline.
 
+- Server Detail: organization/status/mode, 4 summary cards, capability rows, platform collapse, GPU/container tables; nguồn lỗi được hiển thị rõ.
+- Server list giữ link chi tiết + mode; không đổi form workload hoặc public user inputs.
+
 ## PARTIAL
-- Chưa update Server Detail UI; Linux amd64 CGO release build đã PASS.
+- PHASE 5 UI đã typecheck/lint PASS; PHASE 6 browser tests đang chạy. Chưa verify GPU vật lý.
 
 ## TODO
-PHASE 5 UI; PHASE 6 targeted UI/Linux validation; PHASE 7 docs.
+Hoàn tất PHASE 6 browser validation; PHASE 7 docs/OpenAPI.
 
 ## FILES CHANGED
 - cmd/aiwm-agent/main.go
@@ -47,11 +50,13 @@ PHASE 5 UI; PHASE 6 targeted UI/Linux validation; PHASE 7 docs.
 
 - PASS: bash scripts/build-agent-release.sh --output-dir dist/aiwm-agent-capability-20261007 (Linux amd64 CGO/glibc 2.31; chưa chạy GPU thật; artifact không inject URL production).
 
+- PASS: npm.cmd run typecheck; targeted ESLint cho types, Server Detail/list và ServerMode.
+
 ## CURRENT OPERATING MODES
 FULL / GPU_OBSERVE_ONLY / DOCKER_OBSERVE_ONLY / DEGRADED được truyền qua register/inventory đến CP.
 
 ## NEXT STEP
-Đọc frontend AGENTS.md + use-client guide; update src/lib/api/types.ts và src/app/(console)/servers/[serverId]/page.tsx: capability summary, platform collapse, GPU/container tables; targeted UI tests. Không sửa workload form.
+Hoàn tất tests/e2e/server-capabilities.spec.ts; cập nhật existing canonical docs và OpenAPI về source validity + execution gate; không claim GPU hardware đã verify.
 <!-- AGENT_CAPABILITY_STATUS_END -->
 
 # CURRENT PHASE — Phase C: Remove arbitrary labels + Header polish (01/10/2026)
