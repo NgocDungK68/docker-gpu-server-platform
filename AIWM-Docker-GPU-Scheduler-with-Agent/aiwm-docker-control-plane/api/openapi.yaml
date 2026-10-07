@@ -1688,11 +1688,15 @@ components:
           type: object
           additionalProperties:
             type: string
+        capabilityReport:
+          $ref: '#/components/schemas/ServerCapabilities'
         capabilities:
+          description: Danh sách legacy; không dùng làm bằng chứng cho phép execution.
           type: array
           items:
             type: string
     InventoryReport:
+      description: "capabilities đánh dấu nguồn hợp lệ; chỉ thay subset hợp lệ. Không gửi snapshot rỗng giả khi nguồn lỗi. Report legacy thiếu capabilities vẫn được đọc nhưng không cho managed execution."
       type: object
       required:
       - sequence
@@ -1700,6 +1704,8 @@ components:
       - gpus
       - containers
       properties:
+        capabilities:
+          $ref: '#/components/schemas/ServerCapabilities'
         sequence:
           type: integer
           format: int64
@@ -1710,11 +1716,13 @@ components:
         dockerVersion:
           type: string
         gpus:
-          type: array
+          description: Chỉ authoritative khi gpuInventoryAvailable và nvmlAvailable là true.
+          type: [array, "null"]
           items:
             $ref: '#/components/schemas/GPU'
         containers:
-          type: array
+          description: Chỉ authoritative khi dockerAvailable là true.
+          type: [array, "null"]
           items:
             $ref: '#/components/schemas/Container'
         processes:
@@ -2263,9 +2271,74 @@ components:
       - events
       - policy
       - necessityLabel
+    ServerCapabilities:
+      type: object
+      description: "Observation do Agent gửi; CP derive lại operatingMode/managedExecutionReady từ evidence. Đây là khả năng nền tảng, không thay thế freshness, health, occupancy, organization hoặc reservation."
+      properties:
+        agentOperational:
+          type: boolean
+        operatingMode:
+          type: string
+          enum: [FULL, GPU_OBSERVE_ONLY, DOCKER_OBSERVE_ONLY, DEGRADED]
+        os:
+          type: string
+        architecture:
+          type: string
+        kernelVersion:
+          type: string
+        cgroupMode:
+          type: string
+        machineIdAvailable:
+          type: boolean
+        dockerAvailable:
+          type: boolean
+          description: Container inventory đã đọc thành công; không chỉ ping daemon.
+        dockerVersion:
+          type: string
+        dockerApiVersion:
+          type: string
+        dockerOs:
+          type: string
+        gpuInventoryAvailable:
+          type: boolean
+        nvmlAvailable:
+          type: boolean
+        gpuCount:
+          type: integer
+          minimum: 0
+        nvidiaDriverVersion:
+          type: string
+        cudaDriverVersion:
+          type: string
+          description: Phiên bản CUDA driver API; không phải CUDA Toolkit cài trên host.
+        nvidiaContainerSupport:
+          type: boolean
+          description: Docker Info công bố runtime nvidia; không chứng nhận thực thi CUDA/CDI-only.
+        managedExecutionReady:
+          type: boolean
+        reasons:
+          type: [array, "null"]
+          items:
+            type: string
+          description: Mã diagnostic nội bộ; UI không hiển thị raw reason.
+      required:
+      - agentOperational
+      - operatingMode
+      - os
+      - architecture
+      - machineIdAvailable
+      - dockerAvailable
+      - gpuInventoryAvailable
+      - nvmlAvailable
+      - gpuCount
+      - nvidiaContainerSupport
+      - managedExecutionReady
+      - reasons
     Server:
       type: object
       properties:
+        capabilities:
+          $ref: '#/components/schemas/ServerCapabilities'
         organizationId:
           type: string
           description: "Ownership do backend xác định; GPU suy ra từ Server."

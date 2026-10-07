@@ -38,7 +38,12 @@ type Runner struct {
 	persistent  PersistentState
 	registerMu  sync.Mutex
 	inventoryMu sync.Mutex
+	stateErr    error
+	cancel      context.CancelCauseFunc
 }
+
+// errLocalState marks a durability failure; continuing could break identity or idempotency.
+var errLocalState = errors.New("agent local state persistence failed")
 
 func NewRunner(config RunnerConfig, client ControlPlaneClient, inventory InventorySource, executor *CommandExecutor, state StateStore, docker DockerRuntime, logger *slog.Logger) *Runner {
 	if config.CommandLimit <= 0 {
@@ -54,9 +59,20 @@ func NewRunner(config RunnerConfig, client ControlPlaneClient, inventory Invento
 }
 
 func (r *Runner) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	r.mu.Lock()
+	r.cancel = cancel
+	r.mu.Unlock()
 	loaded, err := r.state.Load()
 	if err != nil {
 		return fmt.Errorf("load agent state: %w", err)
+	}
+	if r.config.MachineID == "" || ((loaded.AgentID != "" || loaded.AgentToken != "" || loaded.InventorySequence != 0 || len(loaded.ProcessedCommands) != 0) && loaded.MachineID == "") {
+		return errors.New("agent state requires a verifiable machine identity")
+	}
+	if (loaded.AgentID == "") != (loaded.AgentToken == "") {
+		return errors.New("agent state contains incomplete credentials")
 	}
 	if loaded.MachineID != "" && loaded.MachineID != r.config.MachineID {
 		return fmt.Errorf("state belongs to machine %q, current machine is %q", loaded.MachineID, r.config.MachineID)
@@ -82,10 +98,13 @@ func (r *Runner) Run(ctx context.Context) error {
 		if err == nil {
 			break
 		}
+		if errors.Is(err, errLocalState) {
+			return err
+		}
 		r.logger.Warn("agent startup awaiting control-plane/inventory", "error", err)
 		select {
 		case <-ctx.Done():
-			return nil
+			return r.stateFailure()
 		case <-time.After(retryDelay(r.config.HeartbeatEvery, attempt)):
 		}
 		attempt++
@@ -99,7 +118,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	go func() { defer workers.Done(); r.commandLoop(ctx) }()
 	<-ctx.Done()
 	workers.Wait()
-	return nil
+	return r.stateFailure()
 }
 
 func (r *Runner) heartbeatLoop(ctx context.Context) {
@@ -228,6 +247,9 @@ func (r *Runner) reportInventory(ctx context.Context) error {
 }
 
 func (r *Runner) pollAndExecute(ctx context.Context) error {
+	if err := r.stateFailure(); err != nil {
+		return err
+	}
 	identity := r.identity()
 	commands, err := r.client.PollCommands(ctx, identity.AgentID, identity.AgentToken, r.config.CommandLimit)
 	if errors.Is(err, ErrUnauthorized) {
@@ -240,6 +262,12 @@ func (r *Runner) pollAndExecute(ctx context.Context) error {
 		return err
 	}
 	for _, command := range commands {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := r.stateFailure(); err != nil {
+			return err
+		}
 		ack, processed := r.processed(command.ID)
 		if !processed {
 			ack = r.executor.Execute(ctx, command)
@@ -248,6 +276,9 @@ func (r *Runner) pollAndExecute(ctx context.Context) error {
 			}
 		}
 		identity = r.identity()
+		if err := r.stateFailure(); err != nil {
+			return err
+		}
 		if err := r.client.AckCommand(ctx, identity.AgentID, identity.AgentToken, command.ID, ack); err != nil {
 			return err
 		}
@@ -255,6 +286,9 @@ func (r *Runner) pollAndExecute(ctx context.Context) error {
 		// Publish the resulting actual state immediately. Periodic and
 		// Docker-event inventory remain safety nets if this request fails.
 		if err := r.reportInventory(ctx); err != nil {
+			if errors.Is(err, errLocalState) {
+				return err
+			}
 			r.logger.Warn("post-command inventory failed", "command_id", command.ID, "error", err)
 		}
 	}
@@ -338,7 +372,22 @@ func (r *Runner) remember(commandID string, ack agentv1.CommandAckRequest) error
 }
 
 func (r *Runner) saveLocked() error {
-	return r.state.Save(r.persistent)
+	if r.stateErr != nil {
+		return r.stateErr
+	}
+	if err := r.state.Save(r.persistent); err != nil {
+		r.stateErr = fmt.Errorf("%w: %w", errLocalState, err)
+		if r.cancel != nil {
+			r.cancel(r.stateErr)
+		}
+	}
+	return r.stateErr
+}
+
+func (r *Runner) stateFailure() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stateErr
 }
 
 // retryDelay giới hạn 60 giây, jitter nửa trên để tránh các Agent retry đồng loạt.

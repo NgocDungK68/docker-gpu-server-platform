@@ -1,62 +1,71 @@
 # CURRENT TASK
-Agent capability discovery + graceful degraded mode (07/10/2026)
+Agent capability discovery + graceful degraded mode + Server Detail — hoàn tất phạm vi code/docs (07/10/2026).
 
 ## LAST WORKING CHECKPOINT
-Baseline: 41ffaf5. Backend checkpoint: 0dc9b8c. PHASE 4: safe partial inventory + dynamic capability + execution gate đã PASS.
+- 0dc9b8c: backend capability, partial inventory và scheduling gate.
+- 6f85760: Server Detail + startup writable-state guard; baseline sạch khi resume.
+- Checkpoint tiếp theo chứa state failure classification sau startup, UI error sanitation, OpenAPI/docs và regression cuối; xem Git HEAD sau commit.
 
 ## DONE
-- Model platform.Capabilities tách AgentOperational, nguồn inventory và ManagedExecutionReady; bốn OperatingMode.
-- Probe độc lập, có timeout; runtime thiếu chỉ chặn execution. Non-Linux vẫn báo unsupported execution.
-- Daemon không exit vì preflight degraded; --check vẫn nonzero nếu execution chưa sẵn sàng.
-- NVML thử init lại sau lỗi, driver/CUDA driver version trả unknown nếu không đọc được.
-
-- Collector đọc hai nguồn độc lập; thiếu Docker vẫn có GPU/process, thiếu NVML vẫn có container inventory; nguồn lỗi được đánh dấu rõ, không giả full-empty.
-- Agent revalidation chặn START khi execution capability chưa sẵn sàng.
-
-- Runner gửi capabilities thực tế khi register và inventory; degraded vẫn heartbeat, retry CP, không stop container.
-- CP lưu report, giữ subset cũ khi nguồn lỗi; không reconcile Job khi thiếu nguồn inventory cần thiết.
-- PASS: source failure không giải phóng GPU/Assignment hoặc làm mất RUNNING; report CP GET có capability và deep-copy an toàn.
-
-- Server.Schedulable, scheduler filter và atomic commit chặn capability thiếu/unready; không sửa placement score.
-- API detail giữ organization authorization; capability lưu qua durable restart nhưng startup vẫn offline.
-
-- Server Detail: organization/status/mode, 4 summary cards, capability rows, platform collapse, GPU/container tables; nguồn lỗi được hiển thị rõ.
-- Server list giữ link chi tiết + mode; không đổi form workload hoặc public user inputs.
+- Giữ nguyên FULL / GPU_OBSERVE_ONLY / DOCKER_OBSERVE_ONLY / DEGRADED; observation độc lập, reprobe theo inventory cycle.
+- Docker/NVML/runtime NVIDIA/CP tạm lỗi không làm daemon exit; nguồn invalid không authoritative empty.
+- CP giữ last-known subset, Job/Assignment; capability + fresh full inventory mới mở managed scheduling; gate trước scoring và atomic commit.
+- Fatal rõ cho config/identity conflict, credential thiếu, state decode hoặc state write lỗi. Runner giữ lỗi durability, cancel worker và trả lỗi; không ACK command result chưa persist. Không stop existing containers.
+- Server Detail/list đã có mode, organization, capability, platform collapse và GPU/container; bổ sung feedback an toàn khi API lỗi, không lộ raw exception.
+- OpenAPI ServerCapabilities dùng chung cho register capabilityReport, inventory capabilities và Server response. Public workload input không đổi.
+- Cập nhật SYSTEM_DESIGN, TECH_STACK, API_TESTING_POSTMAN, TESTING_RUNBOOK về report validity, runtime support, local state và test matrix A–G.
+- Không thay policy/placement score/reservation/Agent execution adapter/auth/checkpoint/artifact/PostgreSQL/Prometheus.
 
 ## PARTIAL
-- PHASE 5 UI đã typecheck/lint PASS; PHASE 6 browser tests đang chạy. Chưa verify GPU vật lý.
+- Chưa thử FULL/observe-only trên NVIDIA GPU vật lý; không claim mọi distro hoặc CUDA execution đã verified.
+- Browser tests dùng API fixtures; backend authorization/capability tests dùng application/HTTP thực và dependency fake.
+- Installer hiện có vẫn yêu cầu full preflight cho installation; daemon có thể chạy degraded. Runbook nêu rõ boundary này.
+- CDI-only, ARM64/musl và containerd không nằm trong supported execution scope.
 
 ## TODO
-Hoàn tất PHASE 6 browser validation; PHASE 7 docs/OpenAPI.
+- Kiểm chứng matrix A–E trên Linux GPU host thử nghiệm theo TESTING_RUNBOOK; không còn TODO implementation trong scope phiên này.
 
 ## FILES CHANGED
-- cmd/aiwm-agent/main.go
-- internal/platform/capabilities.go
-- internal/agent/preflight.go, runner.go, capabilities_test.go
-- internal/agent/gpu/recovering.go, recovering_test.go, nvml_linux.go
-- internal/agent/inventory.go, inventory_test.go, inventory_safety_test.go, runner_test.go
-- internal/agentprotocol/v1/types.go
+Trong lần resume từ 6f85760:
+- AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/servers/[serverId]/page.tsx
+- AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/src/app/(console)/servers/page.tsx
+- AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console/tests/e2e/server-capabilities.spec.ts
+- AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/api/openapi.yaml
+- AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/agent/runner.go
+- AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane/internal/agent/state_failure_test.go
+- docs/API_TESTING_POSTMAN.md
 - docs/IMPLEMENTATION_STATUS.md
+- docs/SYSTEM_DESIGN.md
+- docs/TECH_STACK.md
+- docs/TESTING_RUNBOOK.md
 
 ## TESTS VERIFIED
-- PASS: go test ./internal/agent ./internal/agent/gpu ./internal/platform
-- PASS: go build -o ../../.cache/aiwm-agent-capability-check.exe ./cmd/aiwm-agent (Windows compile; Linux CGO chưa verify).
+PASS trong phiên resume:
+- Backend directory: go test ./internal/agent ./internal/agent/gpu ./internal/agent/config ./internal/agent/state
+- Backend directory: go vet ./internal/agent
+- Backend directory: go test ./internal/application -run 'TestPartialInventoryPreservesGPUAndRunningJob|TestExecutionCapabilityGatePrecedesScoringAndCommit' -count=1
+- Backend directory: go test ./internal/httpapi -run 'TestServerCapabilityDetailIsOrganizationScoped|TestSessionAuthorizesOrganizationAtBackend' -count=1
+- Frontend directory: npm.cmd run typecheck
+- Frontend directory: node node_modules/eslint/bin/eslint.js "src/app/(console)/servers/page.tsx" "src/app/(console)/servers/[serverId]/page.tsx" src/features/inventory/server-mode.tsx src/lib/api/types.ts tests/e2e/server-capabilities.spec.ts
+- Frontend directory: AIWM_CONSOLE_URL=http://127.0.0.1:3100, AIWM_BROWSER_CHANNEL=msedge; npm.cmd run test:e2e -- tests/e2e/server-capabilities.spec.ts → 7 PASS.
+- WSL workspace root: bash scripts/build-agent-release.sh --output-dir dist/aiwm-agent-capability-final → Linux amd64 CGO/glibc 2.31 build PASS.
+- WSL workspace root: env AIWM_DOCKER_ENDPOINT=unix:///run/aiwm-capability-check-missing.sock dist/aiwm-agent-capability-final/aiwm-agent --check → DEGRADED, execution=false, exit 1 đúng kỳ vọng (WSL không có NVML usable).
+- OpenAPI: YAML parse + resolve mọi local $ref + kiểm tra ba capability schema references PASS.
+- git diff --check PASS.
 
-- PASS: go test ./internal/agent ./internal/agent/gpu ./internal/agentprotocol/v1 (optional sources + recovery + regression).
-
-- PASS: go test ./internal/agent ./internal/application ./internal/store/memory ./internal/simulator (gồm degraded Runner với CP outage và partial report giữ assignment).
-
-- PASS: go test ./internal/application ./internal/httpapi ./internal/store/memory ./internal/store/durable (gồm gate trước scoring/commit, recovery, GET authorization).
-
-- PASS: bash scripts/build-agent-release.sh --output-dir dist/aiwm-agent-capability-20261007 (Linux amd64 CGO/glibc 2.31; chưa chạy GPU thật; artifact không inject URL production).
-
-- PASS: npm.cmd run typecheck; targeted ESLint cho types, Server Detail/list và ServerMode.
+Artifact: dist/aiwm-agent-capability-final/aiwm-agent + installer + service + SHA256SUMS.
+Artifact kiểm tra dùng localhost development fallback, không inject URL production; deploy thật cần build với --control-plane-url URL thực.
 
 ## CURRENT OPERATING MODES
-FULL / GPU_OBSERVE_ONLY / DOCKER_OBSERVE_ONLY / DEGRADED được truyền qua register/inventory đến CP.
+- FULL: usable Docker/NVML/GPU + Linux amd64 + Docker Linux/API/runtime nvidia; còn freshness/health/org/time gate.
+- GPU_OBSERVE_ONLY: usable GPU, Docker invalid; không managed execution.
+- DOCKER_OBSERVE_ONLY: usable Docker, GPU invalid; giữ last-known GPU, không managed execution.
+- DEGRADED: không đủ execution evidence; vẫn register/heartbeat/report nguồn usable.
+- --check nonzero khi unready; khác với daemon exit do fatal local state/config.
 
 ## NEXT STEP
-Hoàn tất tests/e2e/server-capabilities.spec.ts; cập nhật existing canonical docs và OpenAPI về source validity + execution gate; không claim GPU hardware đã verify.
+Một bước: chạy manual matrix A–E tại docs/TESTING_RUNBOOK.md, mục Agent capability / degraded mode, trên Linux GPU host thử nghiệm. Lệnh khởi đầu sau cài binary: sudo /usr/local/bin/aiwm-agent --check.
+Nếu phát hiện regression, package đầu tiên: internal/agent; exact test từ backend directory: go test ./internal/agent ./internal/agent/gpu -run 'TestCapabilityModesAndRecovery|TestOptionalInventorySourcesKeepUsefulDataAndBlockExecution|TestDegradedRunnerRegistersReportsAndHeartbeatsDespiteOutage|TestLocalStateFailureStopsStartupAndWorkers' -count=1.
 <!-- AGENT_CAPABILITY_STATUS_END -->
 
 # CURRENT PHASE — Phase C: Remove arbitrary labels + Header polish (01/10/2026)

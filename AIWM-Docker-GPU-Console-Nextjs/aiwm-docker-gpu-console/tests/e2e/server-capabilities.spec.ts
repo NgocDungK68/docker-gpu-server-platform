@@ -98,3 +98,13 @@ test("missing capability data is not shown as FULL", async ({ page }) => {
   await expect(page.getByText("Chưa xác định chức năng", { exact: true })).toBeVisible();
   await expect(page.getByText("Đầy đủ chức năng", { exact: true })).toHaveCount(0);
 });
+
+test("server errors show actionable feedback without backend exceptions", async ({ page }) => {
+  await setup(page, true);
+  await page.route("**/api/**/servers/s1", route => route.fulfill({
+    status: 500, json: { error: { message: "NVML probe exception: /var/run/docker.sock private trace" } },
+  }));
+  await page.getByRole("button", { name: "Làm mới", exact: true }).click();
+  await expect(page.getByText("Không lấy được thông tin máy chủ. Vui lòng thử lại.", { exact: true })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText(/NVML|docker.sock|private trace|probe/);
+});

@@ -1,5 +1,107 @@
 # Runbook kiểm thử AIWM
 
+
+## Agent capability / degraded mode — kiểm tra có giới hạn (07/10/2026)
+
+Checkpoint nền: 0dc9b8c (backend), 6f85760 (Server Detail). Regression phiên 07/10: Agent/CP/API tests, typecheck/lint, 7 browser tests và production Linux build PASS. --check trên WSL không có NVML usable + socket Docker giả trả DEGRADED/exit 1 đúng kỳ vọng; chưa xác minh FULL trên GPU vật lý. Không cần dựng lại full fake fleet cho bộ test này. Dùng source hiện tại cho regression; binary phát hành cũ chưa chứa thay đổi này.
+
+### Regression tại máy development
+
+Từ workspace root, PowerShell (các test không cần Docker/GPU thật):
+
+~~~powershell
+cd AIWM-Docker-GPU-Scheduler-with-Agent/aiwm-docker-control-plane
+go test ./internal/agent ./internal/agent/gpu ./internal/agent/config ./internal/agent/state
+go test ./internal/application -run 'TestPartialInventoryPreservesGPUAndRunningJob|TestExecutionCapabilityGatePrecedesScoringAndCommit'
+go test ./internal/httpapi -run 'TestServerCapabilityDetailIsOrganizationScoped|TestSessionAuthorizesOrganizationAtBackend'
+cd ../..
+cd AIWM-Docker-GPU-Console-Nextjs/aiwm-docker-gpu-console
+npm.cmd run typecheck
+node node_modules/eslint/bin/eslint.js "src/app/(console)/servers/page.tsx" "src/app/(console)/servers/[serverId]/page.tsx" src/features/inventory/server-mode.tsx src/lib/api/types.ts tests/e2e/server-capabilities.spec.ts
+npm.cmd run dev -- --hostname 127.0.0.1 --port 3100
+~~~
+
+Terminal PowerShell khác, tại frontend directory:
+
+~~~powershell
+$env:AIWM_CONSOLE_URL='http://127.0.0.1:3100'
+$env:AIWM_BROWSER_CHANNEL='msedge'
+npm.cmd run test:e2e -- tests/e2e/server-capabilities.spec.ts
+~~~
+
+Browser tests dùng API fixtures để kiểm tra UI; Go HTTP tests dùng middleware/scoping thật. Không coi hai kết quả này là E2E NVML/GPU hardware. Source fixture nằm trong internal/agent/capabilities_test.go, degraded_runner_test.go, gpu/recovering_test.go; kiểm tra CP trong application/agent_capabilities_test.go.
+
+| Case | Cách tái hiện an toàn trong test hiện có | Kết quả cần thấy |
+|---|---|---|
+| A. Docker + NVML + runtime nvidia | TestCapabilityModesAndRecovery/full | FULL, execution ready; còn qua health/freshness/org/time |
+| B. Docker unavailable | TestDegradedRunnerRegistersReportsAndHeartbeatsDespiteOutage/docker_unavailable | Process sống, register/heartbeat, GPU report, không START; GPU_OBSERVE_ONLY |
+| C. Thiếu runtime nvidia | TestCapabilityModesAndRecovery/missing_nvidia | GPU/container inventory vẫn có, DEGRADED, execution false |
+| D. NVML unavailable | TestOptionalInventorySourcesKeepUsefulDataAndBlockExecution + TestPartialInventoryPreservesGPUAndRunningJob | Docker inventory usable; GPU/Assignment cũ giữ nguyên; không reconcile mất container hay FREE sai |
+| E. Subsystem phục hồi | TestCapabilityModesAndRecovery/docker_recovery và nvml_recovery; TestPartialInventoryPreservesGPUAndRunningJob | Reprobe → full report → fresh readiness; không đổi identity hoặc preempt workload |
+| F. CP tạm lỗi | TestDegradedRunnerRegistersReportsAndHeartbeatsDespiteOutage | Retry/backoff, không stop existing containers |
+| G. State durability lỗi | TestLocalStateFailureStopsStartupAndWorkers; TestUnpersistedCommandCannotBeAcknowledgedOrReplayedInMemory | Run trả lỗi, dừng worker, không ACK chưa persist, không stop containers |
+
+### Build và kiểm tra production Agent
+
+Tại WSL/workspace root (development/CI, không chạy trên GPU server của đơn vị):
+
+~~~bash
+bash scripts/build-agent-release.sh --output-dir dist/aiwm-agent-capability-final
+~~~
+
+Output directory phải chưa tồn tại; helper từ chối ghi đè. Lệnh không inject URL nên chỉ dùng kiểm tra build; release triển khai thật phải thêm --control-plane-url "$CONTROL_PLANE_URL" như phần Real Deployment Demo. Không chứa token trong artifact.
+
+Trên Linux GPU host đã cài Agent theo phần REAL GPU SERVER E2E:
+
+~~~bash
+sudo /usr/local/bin/aiwm-agent --check
+sudo systemctl status aiwm-agent --no-pager
+sudo journalctl -u aiwm-agent -n 50 --no-pager
+~~~
+
+--check không cần enrollment, không register/pull/start/stop. FULL + managedExecutionReady=true → exit 0. Thiếu dependency → exit 1 với operatingMode/reasons; daemon vẫn có thể quan sát và retry. Installer hiện tại vẫn yêu cầu full preflight trước installation; không diễn giải installer failure thành daemon không hỗ trợ observe-only.
+
+### Kiểm tra trên host thử nghiệm, không phá workload
+
+A: dùng Docker/NVML/runtime nvidia thật, chạy --check rồi xem Máy chủ → tên server → capability và GPU/container. Chưa xác minh thực thi CUDA chỉ bằng preflight.
+
+B: trên **host test đã cài Agent**, dừng duy nhất service Agent để tránh hai process chung identity; không dừng Docker. Foreground nạp config cũ, override endpoint vào đường socket không tồn tại:
+
+~~~bash
+test ! -e /run/aiwm-degraded-test-missing.sock
+sudo systemctl stop aiwm-agent
+sudo sh -c 'set -a; . /etc/aiwm-agent/agent.env; export AIWM_DOCKER_ENDPOINT=unix:///run/aiwm-degraded-test-missing.sock; exec /usr/local/bin/aiwm-agent'
+~~~
+
+Khi NVML còn usable: Agent vẫn sống; UI hiển thị Chỉ giám sát GPU, GPU/process vẫn cập nhật, không có dữ liệu container mới; server.schedulable=false. Container đang chạy do Docker daemon giữ nguyên. Kết thúc foreground bằng Ctrl+C rồi khôi phục **chỉ Agent**:
+
+~~~bash
+sudo systemctl start aiwm-agent
+~~~
+
+C: trên host test mà Docker Info không có runtime nvidia, chạy --check; container/GPU observation vẫn dùng được nhưng execution false. Không sửa/xóa runtime config trên host đang chạy workload chỉ để tạo lỗi.
+
+D: dùng host test không có NVML, hoặc bộ fault-injection tests ở trên; không rename/remove driver/library, không thay quyền GPU của host vận hành. Để chứng minh giữ last-known GPU, test CP bắt đầu từ FULL/RUNNING rồi gửi nguồn NVML invalid, assert GPU/Job/Assignment không mất.
+
+E: nếu dependency/permission được quản trị viên khôi phục ở cùng endpoint, Agent đang chạy reprobe ở chu kỳ inventory (mặc định 15 giây), báo capability mới, CP chỉ cho scheduling sau full fresh inventory. Trường hợp B cố ý đổi endpoint phải khởi động lại Agent với endpoint đúng như lệnh trên; không nhầm đó với phục hồi subsystem tại cùng endpoint.
+
+Trên máy AIWM có source, kiểm tra visibility/readiness bằng helper hiện có và UI detail:
+
+~~~bash
+python3 scripts/agent-admin.py --base-url "$CONTROL_PLANE_URL" --username admin servers
+~~~
+
+User đơn vị chỉ xem server thuộc đơn vị; ADMIN xem organization của server, không lấy đơn vị từ account ADMIN để gán ownership. ManagedExecutionReady không thay thế reservation/health/occupancy. Không submit workload vào server chưa ready để “kiểm tra khả năng chạy”.
+
+### Phân loại lỗi và bảo toàn state
+
+- Fatal: config bắt buộc invalid; MachineID conflict/không xác minh được identity đã lưu; credential lưu dở; state decode lỗi; ghi identity, sequence hoặc command result thất bại.
+- Retryable/non-fatal: Docker/NVML/runtime NVIDIA unavailable, CP/network tạm lỗi.
+- State write lỗi sau startup: Runner giữ lỗi, cancel worker, trả lỗi; service có thể restart theo unit hiện có. Không ACK dựa trên cache RAM chưa persist. Không tự xóa state hoặc đổi MachineID để bỏ qua lỗi.
+- Nếu command đã tác động Docker trước khi lỗi lưu ACK, không rollback/stop container. Sau khôi phục storage, đường managed ownership/idempotency hiện có xử lý redelivery.
+- Update CP trước Agent: CP cũ strict decode có thể từ chối report mới. Agent cũ không report capability vẫn observable nhưng không được managed scheduling.
+
+
 ## Training checkpoint/artifact — checkpoint Phase A (24/09/2026)
 
 **Đã kiểm chứng:** HTTP Control Plane + durable repository + MinIO thật + ứng dụng Python thật: cảnh báo → checkpoint → TIME_LIMIT → Job mới trên server khác → resume → final artifact READY → tải đúng dữ liệu → GPU release. Inventory/Agent được điều khiển tại repository trong test; đây **chưa phải full Agent Sim E2E hoặc GPU Linux E2E**. Agent Sim hiện chỉ mô phỏng Docker operations, không thực thi Python bên trong image.
@@ -520,7 +622,7 @@ sudo systemctl status aiwm-agent --no-pager
 sudo journalctl -u aiwm-agent -n 50 --no-pager
 ~~~
 
---check không register/pull/start/stop container. JSON báo OS/architecture/kernel/cgroup, MachineID availability, Docker reachable/version/API/runtime nvidia, NVML/GPU count; sau đó thử inventory. SUPPORTED + exit 0 là điều kiện nền tảng; DEGRADED/UNSUPPORTED + exit khác 0 phải xử lý trước. Inventory health/free/occupancy vẫn quyết định scheduling.
+--check không register/pull/start/stop container. JSON báo OS/architecture/kernel/cgroup, MachineID availability, Docker reachable/version/API/runtime nvidia, NVML/GPU count; sau đó thử inventory. SUPPORTED/FULL + exit 0 là điều kiện nền tảng cho execution; DEGRADED/UNSUPPORTED + exit khác 0 chỉ chặn execution, không bắt daemon dừng. Inventory health/free/occupancy vẫn quyết định scheduling.
 
 Unit nạp config, restart on failure, chỉ quản lý Agent process. Nếu không có systemd:
 

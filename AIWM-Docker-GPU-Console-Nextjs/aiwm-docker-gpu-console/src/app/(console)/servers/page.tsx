@@ -22,7 +22,7 @@ export default function ServersPage() {
       <div className="relative w-full max-w-md"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
         <input aria-label="Tìm máy chủ" className="field-input pl-9" placeholder="Tên máy chủ, địa chỉ…" value={search} onChange={(event) => setSearch(event.target.value)} /></div>
       <p className="text-sm text-slate-500">{servers.length} máy chủ</p></div>
-      {query.isLoading ? <TableSkeleton /> : query.error ? <div className="p-5"><ErrorState message={query.error.message} onRetry={query.refetch} /></div> :
+      {query.isLoading ? <TableSkeleton /> : query.error ? <div className="p-5"><ErrorState message="Không tải được danh sách máy chủ. Vui lòng thử lại." onRetry={query.refetch} /></div> :
         servers.length === 0 ? <EmptyState icon={<ServerIcon className="size-6" />} title="Không tìm thấy máy chủ" description="Đổi từ khóa hoặc kết nối thêm máy chủ." /> :
         <div className="overflow-x-auto"><table className="data-table"><thead><tr><th>Máy chủ / địa chỉ</th><th>Trạng thái</th><th>GPU sẵn sàng</th><th>Containers</th><th>Cập nhật gần nhất</th></tr></thead>
           <tbody>{servers.map((server) => {

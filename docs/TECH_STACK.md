@@ -46,6 +46,14 @@ Tài liệu mô tả công nghệ đang được nối vào source hiện tại,
 
 CP runtime persistence vẫn là **memory + durable gob snapshot**; business metadata dùng PostgreSQL riêng, không migrate Job/Assignment/Command/inventory. BFF giữ token từng session trong cookie HttpOnly và chỉ forward public routes; Agent dùng enrollment/Agent token riêng. HTTP server có tùy chọn TLS, Agent client có cấu hình CA/client certificate.
 
+## Capability và degraded mode
+
+Không thêm runtime mới hoặc dependency mới. Docker Engine API và NVML là hai nguồn observation độc lập; Docker không đọc được vẫn giữ GPU observation, NVML không đọc được vẫn giữ container observation. Dữ liệu không có nguồn hợp lệ không được biến thành empty authoritative inventory.
+
+internal/platform.Capabilities là value object dùng chung bởi Agent protocol/domain; HTTP/JSON truyền report; memory/durable repository lưu latest capability cùng Server. Đây không phải telemetry history. ManagedExecutionReady cần Linux amd64 + Docker Linux/API + NVML/GPU + Docker runtime nvidia; API này không chứng nhận CUDA execution. Containerd chưa có adapter.
+
+Runtime GPU host dùng prebuilt Agent; không cần Go compiler, không bắt cài CUDA Toolkit. Release Linux amd64 CGO đã build trên glibc 2.31; distro families là target theo ABI/dependency, chưa có xác minh GPU thật trên mọi distro. ARM64/musl không được claim supported. --check nonzero khác với daemon bị cấm chạy: daemon vẫn hoạt động để observation/retry.
+
 ## NVIDIA NVML và go-nvml
 
 **NVML** là NVIDIA Management Library: API quản lý/quan sát GPU được Agent truy cập tại GPU host thông qua NVIDIA driver/library. **go-nvml** là Go binding để gọi API đó, **không phải GPU driver**, không phải scheduler và không phải thư viện thực thi model AI.
@@ -57,11 +65,12 @@ Chuỗi gọi local: `Agent → InventoryCollector → gpu.Reader → go-nvml �
 - GPU index, UUID và model/name.
 - VRAM total/used, GPU utilization và temperature khi đọc được.
 - Compute/graphics running processes: PID, GPU UUID và used GPU memory; process name bổ sung từ `/proc/<pid>/comm`.
+- Driver NVIDIA version và CUDA Driver version qua Reader.DriverInfo; có thể vắng nếu API lỗi/không hỗ trợ. Đây không phải CUDA Toolkit trên host.
 - MIG mode và uncorrected volatile ECC count để đánh giá `Healthy`; việc đọc MIG mode không có nghĩa AIWM cấp phát MIG.
 
 `InventoryCollector` kết hợp GPU/process data với Docker grants/container observations để xác định occupancy; riêng một con số utilization không đủ kết luận GPU được phép cấp phát. **FP8 capability hiện đến từ backend [capability catalog][catalog] theo model aliases**, không được adapter này query trực tiếp từ NVML.
 
-`nvml_linux.go` là Linux adapter; platform khác trả lỗi trong `nvml_unsupported.go`. Dockerfile.sim build với `CGO_ENABLED=1` và nạp mock `libnvidia-ml.so.1` qua `LD_LIBRARY_PATH`; `MOCK_NVML_CONFIG` chọn YAML profile. Production và sim dùng cùng `gpu.New/Reader`, nhưng sim nhận dữ liệu từ mock library. Source mock nằm trong NVIDIA `k8s-test-infra/pkg/gpu/mocknvml`; tên repository này không có nghĩa AIWM dùng Kubernetes runtime.
+`nvml_linux.go` là Linux adapter; platform khác trả lỗi trong `nvml_unsupported.go`. Dockerfile.sim build với `CGO_ENABLED=1` và nạp mock `libnvidia-ml.so.1` qua `LD_LIBRARY_PATH`; `MOCK_NVML_CONFIG` chọn YAML profile. Production dùng gpu.NewRecovering để retry init/snapshot; wrapper vẫn dùng cùng gpu.New/Reader với sim, nhưng sim nhận dữ liệu từ mock library. Source mock nằm trong NVIDIA `k8s-test-infra/pkg/gpu/mocknvml`; tên repository này không có nghĩa AIWM dùng Kubernetes runtime.
 
 ## Sơ đồ công nghệ
 

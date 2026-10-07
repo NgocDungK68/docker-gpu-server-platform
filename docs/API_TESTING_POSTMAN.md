@@ -1,5 +1,41 @@
 # API và kiểm thử bằng Postman
 
+## Server capability/detail — cập nhật 07/10/2026
+
+Không thay request tạo/preview workload. Public GET /api/v1/servers và GET /api/v1/servers/{serverID} trả thêm capabilities nếu Agent đã báo cáo; GET detail vẫn yêu cầu session và kiểm tra Organization phía backend. ADMIN xem cross-org; user ngoài đơn vị nhận 404.
+
+- Register nội bộ: capabilityReport chứa object ServerCapabilities; capabilities dạng string[] cũ chỉ giữ tương thích.
+- Inventory nội bộ: capabilities chứa object cùng schema. DockerAvailable và GPUInventoryAvailable là cờ nguồn dữ liệu usable, không phải trạng thái container/GPU.
+- Server response dùng tên capabilities. Source of truth: internal/platform/capabilities.go; wire: internal/agentprotocol/v1/types.go; mapping: application/agent_protocol.go; merge: store/memory.Store.ReplaceInventory.
+- CP tính lại operatingMode/managedExecutionReady; report không thể chỉ gửi ready=true để bỏ qua các evidence khác.
+- dockerAvailable=false: giữ container snapshot cũ, không suy ra container đã biến mất. gpuInventoryAvailable=false hoặc nvmlAvailable=false: giữ GPU snapshot/assignment cũ. Partial report giữ Job/Reservation, chưa reconcile lifecycle; server.schedulable=false.
+- Source hợp lệ với array rỗng là observation rỗng thật. Source không hợp lệ với array rỗng/null không được hiểu như vậy.
+- Thiếu capabilities (Agent v1 cũ): dữ liệu legacy vẫn hiển thị, execution chưa được xác nhận, schedulable=false. Nâng Control Plane trước Agent; CP cũ dùng strict decoder nên có thể từ chối field mới. Không gửi partial report theo contract cũ.
+
+Ví dụ object capabilities trong response FULL (giá trị minh họa contract; không phải telemetry đo thực):
+
+~~~json
+{
+  "agentOperational": true,
+  "operatingMode": "FULL",
+  "os": "linux",
+  "architecture": "amd64",
+  "machineIdAvailable": true,
+  "dockerAvailable": true,
+  "dockerOs": "linux",
+  "dockerApiVersion": "1.52",
+  "gpuInventoryAvailable": true,
+  "nvmlAvailable": true,
+  "gpuCount": 1,
+  "nvidiaContainerSupport": true,
+  "managedExecutionReady": true,
+  "reasons": null
+}
+~~~
+
+FULL chưa đủ để nhận Job: server còn phải online/fresh/not drained, GPU healthy, không có blocker, đúng organization và time interval. Driver versions có thể vắng nếu không đọc được; không thay bằng giá trị giả. Các fixture Postman cũ không có object capability không chứng minh execution readiness.
+
+
 ## Training checkpoint/artifact — Phase A
 
 Các endpoint mới đã có trong backend OpenAPI. BFF chỉ cho phép continuation và download; không proxy training application endpoints.
@@ -1187,7 +1223,7 @@ POST /api/v1/agents/{agentID}/heartbeat
 **Response / Expected result**
 
 - 200; data: raw Server chứa normalized GPUs/Containers, inventoryVersion, inventoryReceivedAt. Job có thể chuyển RUNNING/terminal cùng transaction.
-- Đây là full replacement, không PATCH. Empty containers có thể kết thúc Job theo missing logic. Chỉ gửi khi đã có complete observation; Postman fixture không kiểm chứng Docker/NVML thật. Wire chỉ giữ state OCCUPIED_UNKNOWN trước CP accounting.
+- Đây là replacement theo nguồn hợp lệ, không phải PATCH từng phần tử. Empty containers chỉ có thể kết thúc Job khi cả nguồn Docker/GPU hợp lệ để reconciliation. Khi nguồn lỗi phải gửi capabilities với cờ nguồn false; Postman fixture không kiểm chứng Docker/NVML thật. Wire chỉ giữ state OCCUPIED_UNKNOWN trước CP accounting.
 
 **Luồng xử lý**
 

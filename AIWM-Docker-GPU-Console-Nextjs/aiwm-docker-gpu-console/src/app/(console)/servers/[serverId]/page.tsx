@@ -34,7 +34,7 @@ export default function ServerDetailPage() {
   const server = query.data;
 
   if (query.isLoading) return <><PageHeader title="Đang tải máy chủ…" /><Card><TableSkeleton rows={7} /></Card></>;
-  if (query.error || !server) return <><PageHeader title="Không tìm thấy máy chủ" /><ErrorState message={query.error?.message} onRetry={query.refetch} /></>;
+  if (query.error || !server) return <><PageHeader title="Không tải được máy chủ" /><ErrorState message="Không lấy được thông tin máy chủ. Vui lòng thử lại." onRetry={query.refetch} /></>;
 
   const caps = server.capabilities;
   const organization = session.user.role === "ADMIN"
@@ -66,7 +66,7 @@ export default function ServerDetailPage() {
   ];
   const commitDrain = () => mutation.mutate(!server.drained, {
     onSuccess: (updated) => { setConfirmOpen(false); pushToast({ tone: "success", title: updated.drained ? "Đã ngừng nhận workload mới" : "Đã mở nhận workload" }); },
-    onError: (error) => pushToast({ tone: "error", title: "Không cập nhật được", description: error.message }),
+    onError: () => pushToast({ tone: "error", title: "Không cập nhật được", description: "Vui lòng thử lại khi kết nối phục hồi." }),
   });
 
   return <>

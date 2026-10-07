@@ -170,7 +170,7 @@ flowchart LR
     EX -->|start / stop managed| ENG
 ~~~
 
-`InventoryCollector.Snapshot` đọc Docker containers → NVML GPUs/processes → Docker version, map grants/processes rồi tạo report kèm `discoverHost`. Hardware gồm hostname, OS, architecture, CPU count, RAM tổng; không có host CPU/RAM utilization collector.
+`InventoryCollector.Snapshot` đọc độc lập NVML GPUs/processes và Docker containers/runtime info, map grants/processes rồi tạo report kèm `discoverHost`. Hardware gồm hostname, OS, architecture, CPU count, RAM tổng; không có host CPU/RAM utilization collector.
 
 Docker adapter list cả stopped containers, inspect containers active hoặc có label managed để lấy state, labels, grants, PID và exit metadata. `running/paused/restarting` đều được xem là consumer. NVML đọc UUID/index/model, memory total/used, utilization, temperature và compute/graphics processes; lỗi telemetry bắt buộc không được biến thành inventory rỗng.
 
@@ -209,14 +209,40 @@ sequenceDiagram
     CP->>CP: Upsert runtime, reset freshness
     CP-->>A: AgentID + AgentToken
     A->>A: Persist credential và inventory sequence
-    A->>D: FULL inventory
-    A->>CP: PUT inventory
-    CP->>CP: Reconcile, normalize occupancy, fresh readiness
+    A->>D: Thu inventory theo nguồn usable
+    A->>CP: PUT inventory + capability/source validity
+    CP->>CP: Giữ nguồn lỗi; reconcile/fresh khi đủ nguồn
 ~~~
 
 Không nhập GPU thủ công và không tin organization từ Agent. `RegisterRequest` không có organizationId; name/labels authoritative lấy từ enrollment. Token chưa bind hết hạn sau 24 giờ. Sau bind, chỉ cùng machine được register lại cho đến khi revoke; token phải được giữ an toàn cho restart/re-auth. Revoke enrollment không thu hồi Agent token đã cấp hoặc dừng workload.
 
-Production `agent.Preflight` đọc OS/architecture/kernel/cgroup, truy cập Docker socket/API/version/info, runtime nvidia, NVML và GPU discovery. Non-Linux → UNSUPPORTED; thiếu Docker/NVML/GPU/runtime evidence → DEGRADED và startup dừng, không fake inventory rỗng. SUPPORTED là điều kiện nền tảng, không thay thế GPU health/occupancy/freshness. `--check` không cần token và không register/mutate container. Chưa có probe thực thi CUDA/CDI-only; xem [TESTING_RUNBOOK](TESTING_RUNBOOK.md).
+Production agent.Preflight chỉ chẩn đoán platform/capability. Daemon vẫn chạy khi Docker/NVML/runtime NVIDIA lỗi; --check trả nonzero khi execution chưa sẵn sàng. Linux amd64 là target release hiện tại; non-Linux không được managed GPU execution. Nguồn: internal/platform/capabilities.go, agent/preflight.go, agent/gpu/recovering.go. Preflight không register/pull/start/stop container, chưa chứng nhận CUDA/CDI-only.
+
+### Capability động và inventory một phần
+
+AgentOperational khác ManagedExecutionReady. Runner gửi capabilityReport khi register và capabilities trong từng inventory; CP lưu Server.Capabilities, public API/Server Detail đọc chính snapshot đó. Agent reprobe theo inventory interval hiện có (mặc định 15 giây), không cần đổi enrollment/identity khi subsystem phục hồi.
+
+| OperatingMode | Dữ liệu usable | Managed GPU execution |
+|---|---|---|
+| FULL | Docker + NVML/GPU, Linux amd64, runtime nvidia được phát hiện | Có thể, còn phải qua freshness/org/resource/time constraints |
+| GPU_OBSERVE_ONLY | NVML/GPU; Docker unavailable | Không |
+| DOCKER_OBSERVE_ONLY | Docker; NVML/GPU unavailable | Không |
+| DEGRADED | Không đủ evidence execution; ví dụ cả hai nguồn lỗi hoặc thiếu NVIDIA runtime | Không |
+
+Docker Info phải công bố runtime nvidia; không dùng nvcc/host CUDA Toolkit làm điều kiện. Docker/NVML probes có context timeout, tuy nhiên không thể hủy cưỡng bức một lời gọi native NVML đang treo. NVML init/snapshot lỗi sẽ đóng reader và thử init lại ở chu kỳ kế tiếp. Event stream Docker lỗi vẫn còn periodic refresh; chưa tự subscribe lại stream.
+
+CP chỉ thay subset có nguồn hợp lệ. Docker lỗi: giữ Containers cũ; GPU/process mới vẫn được xử lý thận trọng. Không correlate được process thì coi unknown, không coi GPU free. NVML lỗi: giữ GPU state/assignment cũ, vẫn cập nhật Docker containers nếu đọc thành công. Partial report không reconcile disappearance/terminal Job; InventoryReceivedAt bị vô hiệu readiness, dù heartbeat vẫn hoạt động. Report đầy đủ mới cho reconcile và freshness trở lại.
+
+Server.Schedulable yêu cầu Capabilities.ManagedExecutionReady trước placement scoring và được kiểm tra lại tại repository commit/dispatch. GPU.Free một mình không vượt qua gate. CP normalize lại evidence, không tin cờ ready được gửi độc lập. Agent v1 cũ thiếu report vẫn observable nhưng chưa được execution; nâng CP trước Agent vì decoder CP cũ từ chối field mới.
+
+### Lỗi local state và lỗi subsystem
+
+Config bắt buộc invalid, MachineID không khớp, credential lưu dở, decode state lỗi, hoặc ghi state thất bại đều fatal. Runner.saveLocked giữ lỗi đầu tiên, cancel các worker và Run trả lỗi; không tiếp tục gửi sequence hoặc ACK dựa trên state chưa lưu bền. Lỗi sau command execution không tự undo/stop container; khi restart phải dùng state hợp lệ và đường idempotency/correlation hiện có.
+
+Docker/NVML/runtime NVIDIA thiếu và CP/network tạm lỗi không fatal: giữ daemon, retry/backoff hiện có và báo capability theo nguồn usable. Agent dừng vì state fatal chỉ dừng process Agent; Docker containers độc lập vẫn chạy. Không tự xóa/reset state để “sửa” conflict.
+
+Server Detail hiển thị organization, online/mode, capability status, GPU/container và platform info thu gọn. Dữ liệu GPU giữ lại khi nguồn lỗi có nhãn lần ghi nhận gần nhất; không hiển thị raw diagnostic/UUID mặc định. User workload input, policy, placement strategy, reservation và training contract giữ nguyên.
+
 
 Metadata bind commit trước Upsert durable; nếu ghi runtime lỗi, retry cùng token/machine dùng cùng ServerID. Không có atomic commit xuyên PostgreSQL/gob. Dữ liệu cũ thiếu org không tự adopt/chuyển ownership.
 
@@ -330,7 +356,7 @@ Trước mọi resource filter/scoring, Scheduler.filter chạy SameOrganization
 ~~~mermaid
 flowchart TD
     Q["Queue đã được policy.Order"] --> SNAP["ListServers snapshot"]
-    SNAP --> SERVER["Server.Schedulable<br/>ONLINE, không drain, heartbeat + inventory fresh"]
+    SNAP --> SERVER["Server.Schedulable<br/>Execution ready, ONLINE, không drain, inventory fresh"]
     SERVER --> LABEL["labelsMatch<br/>legacy ServerSelector"]
     LABEL --> CAP["CapabilityMatches<br/>profile / FP8 / legacy model"]
     CAP --> HEALTH["Healthy"]
@@ -410,7 +436,7 @@ flowchart LR
     STORE --> SCH["Scheduler snapshot"]
 ~~~
 
-Report đầy đủ được chấp nhận trong một repository transaction: validate sequence mới hơn, không trùng GPU UUID với server khác → reconcile Jobs → normalize GPU → thay inventory và cập nhật liveness. Wire validation cũng từ chối UUID lặp ngay trong report. Lỗi Docker inspect/NVML khiến Agent không gửi một snapshot “rỗng coi như free”; CP giữ last-known inventory cho tới khi có report hợp lệ.
+Report đầy đủ được chấp nhận trong một repository transaction: validate sequence mới hơn, không trùng GPU UUID với server khác → reconcile Jobs → normalize GPU → thay inventory và cập nhật liveness. Wire validation cũng từ chối UUID lặp ngay trong report. Lỗi Docker inspect/NVML được gửi dưới dạng partial report có cờ nguồn false. CP giữ last-known subset tương ứng; không chạy lifecycle reconciliation khi thiếu nguồn cần thiết. Report hợp lệ mới có quyền thay subset, kể cả subset rỗng.
 
 `reconcileObservedLocked` map containers `MANAGED` theo JobID, chỉ xét Job nonterminal được assign vào server đang report; nếu nhiều record cùng Job, ưu tiên active. Nó không reconcile External theo ý muốn của AIWM.
 
@@ -440,7 +466,7 @@ sequenceDiagram
     A->>A: Restart: load state, verify MachineID, giữ sequence/history
     A->>CP: Re-register nếu restart/credential bị từ chối
     CP-->>A: Identity/token; cần inventory mới
-    A->>D: FULL inventory
+    A->>D: Thu inventory theo nguồn usable
     A->>CP: Gửi snapshot với sequence mới
     CP->>CP: Reconcile actual/desired, normalize occupancy
     CP->>CP: Chỉ schedulable khi freshness/health/org/drain hợp lệ
@@ -519,7 +545,7 @@ Nguồn: [ServerStatus/Server.Schedulable][model], [UpsertServer/Heartbeat/SetSe
 | Model | Giá trị hiện có / semantics |
 |---|---|
 | GPU | `FREE, RESERVED, ALLOCATED, OCCUPIED_LEGACY, OCCUPIED_UNKNOWN, UNHEALTHY`; normalize từ observations + reservation, không chuyển tuần tự theo một vòng cố định. |
-| Health / schedulability | `Healthy` là bool từ NVML adapter; `Server.Schedulable` xét connectivity/freshness; `GPU.Schedulable` xét Healthy + FREE + chưa assigned. Không có GPU enum ONLINE/AVAILABLE. |
+| Health / schedulability | `Healthy` là bool từ NVML adapter; `Server.Schedulable` xét managed execution capability + connectivity/freshness; `GPU.Schedulable` xét Healthy + FREE + chưa assigned. Không có GPU enum ONLINE/AVAILABLE. |
 | VRAM available | `max(MemoryTotalMiB - MemoryUsedMiB, 0)`; đủ VRAM không đồng nghĩa được phép sử dụng GPU. |
 | Assignment | String `RESERVED, ALLOCATED, RELEASED`, không phải enum Go hay entity Reservation riêng. |
 | Command | `PENDING → DELIVERED → SUCCEEDED/FAILED`; expired lease redeliver vẫn DELIVERED. Cancel START chưa lease dùng FAILED. Repository có thể nhận ACK khi PENDING, không có guard bắt buộc đã DELIVERED. |
