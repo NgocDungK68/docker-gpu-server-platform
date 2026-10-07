@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/platform"
 	"strings"
 
 	agentv1 "github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agentprotocol/v1"
@@ -9,7 +10,24 @@ import (
 )
 
 func inventoryToDomain(report agentv1.InventoryReport) (domain.InventoryReport, error) {
-	result := domain.InventoryReport{Sequence: report.Sequence, ObservedAt: report.ObservedAt, DockerVersion: report.DockerVersion}
+	// Legacy v1 reports are complete observations, but cannot prove execution readiness.
+	capabilities := report.Capabilities.Clone()
+	if capabilities == nil {
+		capabilities = &platform.Capabilities{DockerAvailable: true, GPUInventoryAvailable: true, NVMLAvailable: true}
+	}
+	if !capabilities.NVMLAvailable {
+		capabilities.GPUInventoryAvailable = false
+	}
+	if !capabilities.GPUInventoryAvailable {
+		report.GPUs = nil
+		report.Processes = nil
+	}
+	if !capabilities.DockerAvailable {
+		report.Containers = nil
+	}
+	capabilities.GPUCount = len(report.GPUs)
+	capabilities.Normalize()
+	result := domain.InventoryReport{Capabilities: capabilities, Sequence: report.Sequence, ObservedAt: report.ObservedAt, DockerVersion: report.DockerVersion}
 	result.Host = domain.HostInfo{Hostname: report.Host.Hostname, OS: report.Host.OS, Architecture: report.Host.Architecture, CPUCount: report.Host.CPUCount, MemoryTotalMiB: report.Host.MemoryTotalMiB}
 	seenGPU := make(map[string]struct{}, len(report.GPUs))
 	for _, gpu := range report.GPUs {

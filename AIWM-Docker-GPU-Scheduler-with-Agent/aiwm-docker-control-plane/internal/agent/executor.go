@@ -42,6 +42,9 @@ func (e *CommandExecutor) Execute(ctx context.Context, command agentv1.Command) 
 		}
 		return agentv1.CommandAckRequest{Succeeded: true, ContainerID: containerID, Message: "managed container started"}
 	case "STOP_CONTAINER":
+		if e.docker == nil {
+			return failedAck("Docker unavailable")
+		}
 		var payload agentv1.StopContainerPayload
 		if err := strictUnmarshal(command.Payload, &payload); err != nil {
 			return failedAck("invalid stop payload: " + err.Error())

@@ -25,7 +25,7 @@ func newPlanningFixture(t *testing.T) *planningFixture {
 	f := &planningFixture{t: t, now: time.Date(2026, 9, 23, 8, 0, 0, 0, time.UTC), ctx: allocationContext(), repo: memory.New(time.Minute)}
 	f.cp = New(f.repo, Options{OfflineAfter: time.Minute, CommandLease: time.Second})
 	f.cp.now = func() time.Time { return f.now }
-	_, err := f.repo.UpsertServer(f.ctx, domain.Server{ID: "s", MachineID: "m", OrganizationID: "test-org", Status: domain.ServerOnline, LastHeartbeatAt: f.now})
+	_, err := f.repo.UpsertServer(f.ctx, domain.Server{ID: "s", MachineID: "m", OrganizationID: "test-org", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: f.now})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +167,7 @@ func TestPlanningOrganizationIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = f.repo.UpsertServer(f.ctx, domain.Server{ID: "vds", MachineID: "vds", OrganizationID: "vds", Status: domain.ServerOnline, LastHeartbeatAt: f.now, InventoryReceivedAt: f.now,
+	_, err = f.repo.UpsertServer(f.ctx, domain.Server{ID: "vds", MachineID: "vds", OrganizationID: "vds", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: f.now, InventoryReceivedAt: f.now,
 		GPUs: []domain.GPU{{UUID: "GPU-vds", Model: "A100", MemoryTotalMiB: 40960, Healthy: true, State: domain.GPUFree}}})
 	if err != nil {
 		t.Fatal(err)

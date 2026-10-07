@@ -1,3 +1,59 @@
+# CURRENT TASK
+Agent capability discovery + graceful degraded mode (07/10/2026)
+
+## LAST WORKING CHECKPOINT
+Baseline: 41ffaf5. PHASE 4: safe partial inventory + dynamic capability + execution gate đã PASS.
+
+## DONE
+- Model platform.Capabilities tách AgentOperational, nguồn inventory và ManagedExecutionReady; bốn OperatingMode.
+- Probe độc lập, có timeout; runtime thiếu chỉ chặn execution. Non-Linux vẫn báo unsupported execution.
+- Daemon không exit vì preflight degraded; --check vẫn nonzero nếu execution chưa sẵn sàng.
+- NVML thử init lại sau lỗi, driver/CUDA driver version trả unknown nếu không đọc được.
+
+- Collector đọc hai nguồn độc lập; thiếu Docker vẫn có GPU/process, thiếu NVML vẫn có container inventory; nguồn lỗi được đánh dấu rõ, không giả full-empty.
+- Agent revalidation chặn START khi execution capability chưa sẵn sàng.
+
+- Runner gửi capabilities thực tế khi register và inventory; degraded vẫn heartbeat, retry CP, không stop container.
+- CP lưu report, giữ subset cũ khi nguồn lỗi; không reconcile Job khi thiếu nguồn inventory cần thiết.
+- PASS: source failure không giải phóng GPU/Assignment hoặc làm mất RUNNING; report CP GET có capability và deep-copy an toàn.
+
+- Server.Schedulable, scheduler filter và atomic commit chặn capability thiếu/unready; không sửa placement score.
+- API detail giữ organization authorization; capability lưu qua durable restart nhưng startup vẫn offline.
+
+## PARTIAL
+- Chưa update Server Detail UI; Linux amd64 CGO release build đã PASS.
+
+## TODO
+PHASE 5 UI; PHASE 6 targeted UI/Linux validation; PHASE 7 docs.
+
+## FILES CHANGED
+- cmd/aiwm-agent/main.go
+- internal/platform/capabilities.go
+- internal/agent/preflight.go, runner.go, capabilities_test.go
+- internal/agent/gpu/recovering.go, recovering_test.go, nvml_linux.go
+- internal/agent/inventory.go, inventory_test.go, inventory_safety_test.go, runner_test.go
+- internal/agentprotocol/v1/types.go
+- docs/IMPLEMENTATION_STATUS.md
+
+## TESTS VERIFIED
+- PASS: go test ./internal/agent ./internal/agent/gpu ./internal/platform
+- PASS: go build -o ../../.cache/aiwm-agent-capability-check.exe ./cmd/aiwm-agent (Windows compile; Linux CGO chưa verify).
+
+- PASS: go test ./internal/agent ./internal/agent/gpu ./internal/agentprotocol/v1 (optional sources + recovery + regression).
+
+- PASS: go test ./internal/agent ./internal/application ./internal/store/memory ./internal/simulator (gồm degraded Runner với CP outage và partial report giữ assignment).
+
+- PASS: go test ./internal/application ./internal/httpapi ./internal/store/memory ./internal/store/durable (gồm gate trước scoring/commit, recovery, GET authorization).
+
+- PASS: bash scripts/build-agent-release.sh --output-dir dist/aiwm-agent-capability-20261007 (Linux amd64 CGO/glibc 2.31; chưa chạy GPU thật; artifact không inject URL production).
+
+## CURRENT OPERATING MODES
+FULL / GPU_OBSERVE_ONLY / DOCKER_OBSERVE_ONLY / DEGRADED được truyền qua register/inventory đến CP.
+
+## NEXT STEP
+Đọc frontend AGENTS.md + use-client guide; update src/lib/api/types.ts và src/app/(console)/servers/[serverId]/page.tsx: capability summary, platform collapse, GPU/container tables; targeted UI tests. Không sửa workload form.
+<!-- AGENT_CAPABILITY_STATUS_END -->
+
 # CURRENT PHASE — Phase C: Remove arbitrary labels + Header polish (01/10/2026)
 
 Baseline: `81e5e5f`. Working tree sạch khi bắt đầu; giữ nguyên Phase A WORKING và Phase B DONE.

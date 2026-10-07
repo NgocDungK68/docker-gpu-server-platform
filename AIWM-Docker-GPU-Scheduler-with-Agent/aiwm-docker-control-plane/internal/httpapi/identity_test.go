@@ -60,7 +60,7 @@ func identityHandler(t *testing.T) (http.Handler, *identityMetadata) {
 		now := time.Now()
 		_, err := repo.UpsertServer(ctx, domain.Server{
 			ID: "server-" + org, MachineID: "machine-" + org, OrganizationID: org,
-			Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
+			Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
 			GPUs: []domain.GPU{{UUID: "GPU-" + org, Model: "A100", MemoryTotalMiB: 40960, Healthy: true, State: domain.GPUFree}},
 		})
 		if err != nil {

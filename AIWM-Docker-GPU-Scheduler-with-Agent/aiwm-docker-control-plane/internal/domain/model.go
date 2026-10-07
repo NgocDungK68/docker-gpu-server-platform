@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/platform"
 	"time"
 )
 
@@ -79,26 +80,27 @@ const (
 )
 
 type Server struct {
-	OrganizationID      string            `json:"organizationId"`
-	SchedulingReady     bool              `json:"schedulable"`
-	SchedulingReason    string            `json:"schedulingReason"`
-	Host                HostInfo          `json:"host"`
-	ID                  string            `json:"id"`
-	MachineID           string            `json:"machineId"`
-	Name                string            `json:"name"`
-	Address             string            `json:"address,omitempty"`
-	AgentVersion        string            `json:"agentVersion,omitempty"`
-	Labels              map[string]string `json:"labels,omitempty"`
-	Status              ServerStatus      `json:"status"`
-	Drained             bool              `json:"drained"`
-	LastHeartbeatAt     time.Time         `json:"lastHeartbeatAt"`
-	LastInventoryAt     time.Time         `json:"lastInventoryAt,omitempty"`
-	InventoryReceivedAt time.Time         `json:"inventoryReceivedAt,omitempty"`
-	DockerVersion       string            `json:"dockerVersion,omitempty"`
-	InventoryVersion    uint64            `json:"inventoryVersion"`
-	GPUs                []GPU             `json:"gpus"`
-	Containers          []Container       `json:"containers"`
-	TokenHash           [32]byte          `json:"-"`
+	Capabilities        *platform.Capabilities `json:"capabilities,omitempty"`
+	OrganizationID      string                 `json:"organizationId"`
+	SchedulingReady     bool                   `json:"schedulable"`
+	SchedulingReason    string                 `json:"schedulingReason"`
+	Host                HostInfo               `json:"host"`
+	ID                  string                 `json:"id"`
+	MachineID           string                 `json:"machineId"`
+	Name                string                 `json:"name"`
+	Address             string                 `json:"address,omitempty"`
+	AgentVersion        string                 `json:"agentVersion,omitempty"`
+	Labels              map[string]string      `json:"labels,omitempty"`
+	Status              ServerStatus           `json:"status"`
+	Drained             bool                   `json:"drained"`
+	LastHeartbeatAt     time.Time              `json:"lastHeartbeatAt"`
+	LastInventoryAt     time.Time              `json:"lastInventoryAt,omitempty"`
+	InventoryReceivedAt time.Time              `json:"inventoryReceivedAt,omitempty"`
+	DockerVersion       string                 `json:"dockerVersion,omitempty"`
+	InventoryVersion    uint64                 `json:"inventoryVersion"`
+	GPUs                []GPU                  `json:"gpus"`
+	Containers          []Container            `json:"containers"`
+	TokenHash           [32]byte               `json:"-"`
 }
 
 // HostInfo describes observed machine hardware independently from its scheduling state.
@@ -112,7 +114,7 @@ type HostInfo struct {
 
 // Schedulable requires fresh connectivity and a complete recent inventory.
 func (s Server) Schedulable(now time.Time, offlineAfter time.Duration) bool {
-	return s.Status == ServerOnline && !s.Drained && !s.InventoryReceivedAt.IsZero() &&
+	return s.Capabilities != nil && s.Capabilities.ManagedExecutionReady && s.Status == ServerOnline && !s.Drained && !s.InventoryReceivedAt.IsZero() &&
 		now.Sub(s.LastHeartbeatAt) <= offlineAfter && now.Sub(s.InventoryReceivedAt) <= offlineAfter
 }
 

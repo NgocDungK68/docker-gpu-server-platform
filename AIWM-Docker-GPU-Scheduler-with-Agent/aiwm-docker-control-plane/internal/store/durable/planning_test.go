@@ -21,7 +21,7 @@ func TestCalendarCommitRollbackAndRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = s.Close() }()
-	_, err = s.UpsertServer(ctx, domain.Server{ID: "s", MachineID: "m", OrganizationID: "org", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{{UUID: "g", Healthy: true, State: domain.GPUFree, MemoryTotalMiB: 100}}})
+	_, err = s.UpsertServer(ctx, domain.Server{ID: "s", MachineID: "m", OrganizationID: "org", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{{UUID: "g", Healthy: true, State: domain.GPUFree, MemoryTotalMiB: 100}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,6 +69,9 @@ func TestCalendarCommitRollbackAndRestart(t *testing.T) {
 		t.Fatal("calendar did not survive restart", a)
 	}
 	server, _ := s.GetServer(ctx, "s")
+	if server.Capabilities == nil || !server.Capabilities.ManagedExecutionReady || server.Schedulable(now, time.Minute) {
+		t.Fatal("capability persistence bypassed startup freshness")
+	}
 	if server.Status != domain.ServerOffline {
 		t.Fatal("restart skipped fresh inventory gate")
 	}

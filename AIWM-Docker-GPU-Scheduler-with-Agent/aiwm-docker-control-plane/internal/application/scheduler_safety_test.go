@@ -10,7 +10,7 @@ import (
 func TestAllPoliciesAndDeterministicTies(t *testing.T) {
 	now := time.Now()
 	makeServer := func(id string, free int) domain.Server {
-		s := domain.Server{OrganizationID: "test-org", ID: id, Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now}
+		s := domain.Server{OrganizationID: "test-org", ID: id, Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now}
 		for i := 0; i < 4; i++ {
 			state := domain.GPUOccupiedLegacy
 			if i < free {
@@ -55,7 +55,7 @@ func TestSchedulerFiltersAndPendingReasons(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := domain.Server{OrganizationID: "test-org", ID: "s", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-0", domain.GPUFree)}}
+			s := domain.Server{OrganizationID: "test-org", ID: "s", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-0", domain.GPUFree)}}
 			j := domain.Job{OrganizationID: "test-org", Resources: domain.ResourceRequest{GPUCount: 1}}
 			tc.mutate(&s, &j)
 			_, err := NewScheduler(domain.StrategyBestFit, time.Minute).Plan(j, []domain.Server{s}, now)
@@ -70,9 +70,9 @@ func TestSchedulerFiltersAndPendingReasons(t *testing.T) {
 func TestInjectedPlacementPolicyKeepsHardConstraints(t *testing.T) {
 	now := time.Now()
 	servers := []domain.Server{
-		{OrganizationID: "test-org", ID: "a", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-a", domain.GPUFree)}},
-		{OrganizationID: "test-org", ID: "b", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-b", domain.GPUFree)}},
-		{OrganizationID: "test-org", ID: "c", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-c", domain.GPUOccupiedLegacy)}},
+		{OrganizationID: "test-org", ID: "a", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-a", domain.GPUFree)}},
+		{OrganizationID: "test-org", ID: "b", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-b", domain.GPUFree)}},
+		{OrganizationID: "test-org", ID: "c", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-c", domain.GPUOccupiedLegacy)}},
 	}
 	scorer := scoreFunc(func(server domain.Server, _, _ []domain.GPU) float64 {
 		if server.ID == "c" {
@@ -94,8 +94,8 @@ func TestInjectedPlacementPolicyKeepsHardConstraints(t *testing.T) {
 func TestOrganizationFilterPrecedesScoringForEveryStrategy(t *testing.T) {
 	now := time.Now()
 	servers := []domain.Server{
-		{ID: "foreign", OrganizationID: "other-org", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-foreign", domain.GPUFree)}},
-		{ID: "own", OrganizationID: "test-org", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-own", domain.GPUFree)}},
+		{ID: "foreign", OrganizationID: "other-org", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-foreign", domain.GPUFree)}},
+		{ID: "own", OrganizationID: "test-org", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{gpu("GPU-own", domain.GPUFree)}},
 	}
 	for _, strategy := range []domain.SchedulingStrategy{domain.StrategyFirstFit, domain.StrategyBestFit, domain.StrategyBinPack, domain.StrategyFragmentation} {
 		t.Run(string(strategy), func(t *testing.T) {

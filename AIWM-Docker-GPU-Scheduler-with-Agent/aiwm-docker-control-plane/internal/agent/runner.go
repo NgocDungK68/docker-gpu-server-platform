@@ -47,6 +47,9 @@ func NewRunner(config RunnerConfig, client ControlPlaneClient, inventory Invento
 	if config.MaxCommandHistory <= 0 {
 		config.MaxCommandHistory = 1000
 	}
+	if collector, ok := inventory.(*InventoryCollector); ok {
+		collector.machineID = config.MachineID
+	}
 	return &Runner{config: config, client: client, inventory: inventory, executor: executor, state: state, docker: docker, logger: logger}
 }
 
@@ -66,23 +69,20 @@ func (r *Runner) Run(ctx context.Context) error {
 	r.persistent = loaded
 	r.mu.Unlock()
 
-	attempt:=0
+	attempt := 0
 	for {
-		err := r.docker.Ping(ctx)
-		if err == nil {
-			err = r.ensureRegistered(ctx, loaded.AgentID)
-		}
+		err := r.ensureRegistered(ctx, loaded.AgentID)
 		if err == nil {
 			err = r.reportInventory(ctx)
 		}
 		if err == nil {
 			break
 		}
-		r.logger.Warn("agent startup awaiting Docker/control-plane/inventory", "error", err)
+		r.logger.Warn("agent startup awaiting control-plane/inventory", "error", err)
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(retryDelay(r.config.HeartbeatEvery,attempt)):
+		case <-time.After(retryDelay(r.config.HeartbeatEvery, attempt)):
 		}
 		attempt++
 	}
@@ -101,7 +101,7 @@ func (r *Runner) Run(ctx context.Context) error {
 func (r *Runner) heartbeatLoop(ctx context.Context) {
 	ticker := time.NewTimer(r.config.HeartbeatEvery)
 	defer ticker.Stop()
-	attempt:=0
+	attempt := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -112,11 +112,19 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 			if errors.Is(err, ErrUnauthorized) {
 				err = r.ensureRegistered(ctx, identity.AgentID)
 			}
-			if err==nil && attempt>0 { err=r.reportInventory(ctx) }
+			if err == nil && attempt > 0 {
+				err = r.reportInventory(ctx)
+			}
 			if err != nil && !errors.Is(err, context.Canceled) {
 				r.logger.Warn("heartbeat failed", "error", err)
 			}
-			if err!=nil { ticker.Reset(retryDelay(r.config.HeartbeatEvery,attempt)); attempt++ } else { attempt=0; ticker.Reset(r.config.HeartbeatEvery) }
+			if err != nil {
+				ticker.Reset(retryDelay(r.config.HeartbeatEvery, attempt))
+				attempt++
+			} else {
+				attempt = 0
+				ticker.Reset(r.config.HeartbeatEvery)
+			}
 		}
 	}
 }
@@ -124,7 +132,11 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 func (r *Runner) inventoryLoop(ctx context.Context) {
 	ticker := time.NewTicker(r.config.InventoryEvery)
 	defer ticker.Stop()
-	events, eventErrors := r.docker.WatchContainerEvents(ctx)
+	var events <-chan struct{}
+	var eventErrors <-chan error
+	if r.docker != nil {
+		events, eventErrors = r.docker.WatchContainerEvents(ctx)
+	}
 	var debounce <-chan time.Time
 	for {
 		select {
@@ -155,17 +167,23 @@ func (r *Runner) inventoryLoop(ctx context.Context) {
 func (r *Runner) commandLoop(ctx context.Context) {
 	ticker := time.NewTimer(r.config.CommandPollEvery)
 	defer ticker.Stop()
-	attempt:=0
+	attempt := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			err:=r.pollAndExecute(ctx)
+			err := r.pollAndExecute(ctx)
 			if err != nil && !errors.Is(err, context.Canceled) {
 				r.logger.Warn("command poll failed", "error", err)
 			}
-			if err!=nil { ticker.Reset(retryDelay(r.config.CommandPollEvery,attempt)); attempt++ } else { attempt=0; ticker.Reset(r.config.CommandPollEvery) }
+			if err != nil {
+				ticker.Reset(retryDelay(r.config.CommandPollEvery, attempt))
+				attempt++
+			} else {
+				attempt = 0
+				ticker.Reset(r.config.CommandPollEvery)
+			}
 		}
 	}
 }
@@ -209,7 +227,9 @@ func (r *Runner) pollAndExecute(ctx context.Context) error {
 	identity := r.identity()
 	commands, err := r.client.PollCommands(ctx, identity.AgentID, identity.AgentToken, r.config.CommandLimit)
 	if errors.Is(err, ErrUnauthorized) {
-		if err:=r.ensureRegistered(ctx, identity.AgentID); err!=nil { return err }
+		if err := r.ensureRegistered(ctx, identity.AgentID); err != nil {
+			return err
+		}
 		return r.reportInventory(ctx)
 	}
 	if err != nil {
@@ -247,10 +267,26 @@ func (r *Runner) ensureRegistered(ctx context.Context, failedAgentID string) err
 	if current.AgentID != "" && failedAgentID == "" {
 		return nil
 	}
+	report, err := r.inventory.Snapshot(ctx, 1)
+	if err != nil {
+		return fmt.Errorf("probe agent capabilities: %w", err)
+	}
+	capabilities := []string{}
+	if report.Capabilities != nil {
+		if report.Capabilities.DockerAvailable {
+			capabilities = append(capabilities, "docker-inventory")
+		}
+		if report.Capabilities.GPUInventoryAvailable {
+			capabilities = append(capabilities, "nvml-inventory")
+		}
+		if report.Capabilities.ManagedExecutionReady {
+			capabilities = append(capabilities, "managed-container-v1")
+		}
+	}
 	response, err := r.client.Register(ctx, agentv1.RegisterRequest{
 		ProtocolVersion: agentv1.ProtocolVersion, MachineID: r.config.MachineID, Name: r.config.Name,
 		AgentVersion: r.config.AgentVersion, Labels: cloneMap(r.config.Labels),
-		Capabilities: []string{"docker-inventory", "nvml-inventory", "managed-container-v1"},
+		Capabilities: capabilities, CapabilityReport: report.Capabilities,
 	}, r.config.EnrollmentToken)
 	if err != nil {
 		return fmt.Errorf("register agent: %w", err)
@@ -302,9 +338,15 @@ func (r *Runner) saveLocked() error {
 }
 
 // retryDelay giới hạn 60 giây, jitter nửa trên để tránh các Agent retry đồng loạt.
-func retryDelay(base time.Duration,attempt int) time.Duration {
-	if base<time.Second { base=time.Second }
-	for i:=0; i<attempt && base<30*time.Second; i++ { base*=2 }
-	if base>60*time.Second { base=60*time.Second }
-	return base/2+time.Duration(rand.Int64N(int64(base/2)+1))
+func retryDelay(base time.Duration, attempt int) time.Duration {
+	if base < time.Second {
+		base = time.Second
+	}
+	for i := 0; i < attempt && base < 30*time.Second; i++ {
+		base *= 2
+	}
+	if base > 60*time.Second {
+		base = 60 * time.Second
+	}
+	return base/2 + time.Duration(rand.Int64N(int64(base/2)+1))
 }

@@ -21,7 +21,7 @@ func allocationFixture(t *testing.T) (*ControlPlane, *memory.Store) {
 	t.Helper()
 	now := time.Now().UTC()
 	repo := memory.New(time.Minute)
-	_, err := repo.UpsertServer(allocationContext(), domain.Server{OrganizationID: "test-org", ID: "s", MachineID: "m", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
+	_, err := repo.UpsertServer(allocationContext(), domain.Server{OrganizationID: "test-org", ID: "s", MachineID: "m", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
 		GPUs: []domain.GPU{{UUID: "GPU-a", Model: "A100", MemoryTotalMiB: 40960, Healthy: true, State: domain.GPUFree}}})
 	if err != nil {
 		t.Fatal(err)

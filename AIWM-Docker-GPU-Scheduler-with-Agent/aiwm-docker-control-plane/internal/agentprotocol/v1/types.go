@@ -6,6 +6,8 @@ package v1
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/platform"
 )
 
 const (
@@ -17,13 +19,14 @@ const (
 )
 
 type RegisterRequest struct {
-	ProtocolVersion string            `json:"protocolVersion"`
-	MachineID       string            `json:"machineId"`
-	Name            string            `json:"name"`
-	Address         string            `json:"address,omitempty"`
-	AgentVersion    string            `json:"agentVersion,omitempty"`
-	Labels          map[string]string `json:"labels,omitempty"`
-	Capabilities    []string          `json:"capabilities,omitempty"`
+	CapabilityReport *platform.Capabilities `json:"capabilityReport,omitempty"`
+	ProtocolVersion  string                 `json:"protocolVersion"`
+	MachineID        string                 `json:"machineId"`
+	Name             string                 `json:"name"`
+	Address          string                 `json:"address,omitempty"`
+	AgentVersion     string                 `json:"agentVersion,omitempty"`
+	Labels           map[string]string      `json:"labels,omitempty"`
+	Capabilities     []string               `json:"capabilities,omitempty"`
 }
 
 type RegisterResponse struct {
@@ -37,13 +40,14 @@ type HeartbeatRequest struct {
 }
 
 type InventoryReport struct {
-	Host          HostInfo     `json:"host"`
-	Sequence      uint64       `json:"sequence"`
-	ObservedAt    time.Time    `json:"observedAt"`
-	DockerVersion string       `json:"dockerVersion,omitempty"`
-	GPUs          []GPU        `json:"gpus"`
-	Containers    []Container  `json:"containers"`
-	Processes     []GPUProcess `json:"processes,omitempty"`
+	Capabilities  *platform.Capabilities `json:"capabilities,omitempty"`
+	Host          HostInfo               `json:"host"`
+	Sequence      uint64                 `json:"sequence"`
+	ObservedAt    time.Time              `json:"observedAt"`
+	DockerVersion string                 `json:"dockerVersion,omitempty"`
+	GPUs          []GPU                  `json:"gpus"`
+	Containers    []Container            `json:"containers"`
+	Processes     []GPUProcess           `json:"processes,omitempty"`
 }
 
 // HostInfo is a hardware observation, never a desired resource allocation.

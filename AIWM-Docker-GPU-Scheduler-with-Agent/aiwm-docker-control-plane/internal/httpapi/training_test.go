@@ -71,7 +71,7 @@ func newTrainingHTTP(t *testing.T, objects ports.ObjectStore) *trainingHTTPFixtu
 func (f *trainingHTTPFixture) addServer(t *testing.T, id, gpu string) {
 	t.Helper()
 	now := time.Now().UTC()
-	_, err := f.repo.UpsertServer(f.ctx, domain.Server{ID: id, MachineID: "m-" + id, OrganizationID: "own", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{{UUID: gpu, Model: "A100", State: domain.GPUFree, Healthy: true, MemoryTotalMiB: 40960}}})
+	_, err := f.repo.UpsertServer(f.ctx, domain.Server{ID: id, MachineID: "m-" + id, OrganizationID: "own", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now, GPUs: []domain.GPU{{UUID: gpu, Model: "A100", State: domain.GPUFree, Healthy: true, MemoryTotalMiB: 40960}}})
 	if err != nil {
 		t.Fatal(err)
 	}

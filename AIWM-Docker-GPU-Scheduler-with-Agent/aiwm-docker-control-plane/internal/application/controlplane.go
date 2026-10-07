@@ -115,6 +115,7 @@ func (c *ControlPlane) RegisterAgent(ctx context.Context, enrollmentToken string
 	}
 	server, err := c.repository.UpsertServer(ctx, domain.Server{
 		OrganizationID: owner.OrganizationID,
+ Capabilities: request.CapabilityReport.Clone(),
 		ID:             agentID, MachineID: request.MachineID, Name: request.Name, Address: request.Address,
 		AgentVersion: request.AgentVersion, Labels: request.Labels, Status: domain.ServerOnline,
 		LastHeartbeatAt: now, TokenHash: sha256.Sum256([]byte(token)),
@@ -214,6 +215,8 @@ func (c *ControlPlane) presentServer(server domain.Server) domain.Server {
 		server.SchedulingReason = "server chưa có organization ownership"
 	case server.Status == domain.ServerOffline || c.now().Sub(server.LastHeartbeatAt) > c.offlineAfter:
 		server.SchedulingReason = "agent offline"
+	case server.Capabilities == nil || !server.Capabilities.ManagedExecutionReady:
+ server.SchedulingReason = "MANAGED_EXECUTION_UNAVAILABLE"
 	case server.Drained:
 		server.SchedulingReason = "server drained"
 	case server.InventoryReceivedAt.IsZero() || c.now().Sub(server.InventoryReceivedAt) > c.offlineAfter:

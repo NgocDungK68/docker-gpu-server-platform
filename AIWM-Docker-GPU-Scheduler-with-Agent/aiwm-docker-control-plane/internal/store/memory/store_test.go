@@ -16,7 +16,7 @@ func TestCommitAssignmentIsAtomic(t *testing.T) {
 	store := New()
 	now := time.Now().UTC()
 	_, err := store.UpsertServer(ctx, domain.Server{
-		OrganizationID: "test-org", ID: "server-1", MachineID: "machine-1", Name: "server-1", Status: domain.ServerOnline,
+		OrganizationID: "test-org", ID: "server-1", MachineID: "machine-1", Name: "server-1", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline,
 		LastHeartbeatAt: now, InventoryReceivedAt: now,
 		GPUs: []domain.GPU{{UUID: "gpu-1", Healthy: true, State: domain.GPUFree}},
 	})

@@ -48,6 +48,7 @@ func (s *Store) UpsertServer(_ context.Context, incoming domain.Server) (domain.
 		existing.Name = incoming.Name
 		existing.Address = incoming.Address
 		existing.AgentVersion = incoming.AgentVersion
+		existing.Capabilities = incoming.Capabilities.Clone()
 		existing.Labels = cloneMap(incoming.Labels)
 		existing.Status = domain.ServerOnline
 		existing.InventoryReceivedAt = time.Time{}
@@ -133,12 +134,30 @@ func (s *Store) ReplaceInventory(_ context.Context, agentID string, report domai
 		report.ReceivedAt = report.ObservedAt
 	}
 	server.LastHeartbeatAt = report.ReceivedAt
-	server.InventoryReceivedAt = report.ReceivedAt
-	server.DockerVersion = report.DockerVersion
+	// nil is the pre-capability internal repository contract: both sources are complete.
+	// The HTTP/application boundary always supplies a report, even for legacy Agents.
+	gpuValid, dockerValid := true, true
+	if report.Capabilities != nil {
+		gpuValid, dockerValid = report.Capabilities.GPUInventoryAvailable, report.Capabilities.DockerAvailable
+		server.Capabilities = report.Capabilities.Clone()
+		server.Capabilities.Normalize()
+	}
+	server.InventoryReceivedAt = time.Time{}
+	if gpuValid && dockerValid {
+		server.InventoryReceivedAt = report.ReceivedAt
+	}
 	server.Host = report.Host
-	s.reconcileObservedLocked(agentID, report)
-	server.GPUs = normalizeGPUState(agentID, report.GPUs, report.Containers, report.Processes, s.jobs)
-	server.Containers = cloneContainers(report.Containers)
+	if dockerValid {
+		server.DockerVersion = report.DockerVersion
+		server.Containers = cloneContainers(report.Containers)
+	}
+	// Missing Docker observations are never evidence that a running workload disappeared.
+	if gpuValid && dockerValid {
+		s.reconcileObservedLocked(agentID, report)
+	}
+	if gpuValid {
+		server.GPUs = normalizeGPUState(agentID, report.GPUs, server.Containers, report.Processes, s.jobs)
+	}
 	if server.Drained {
 		server.Status = domain.ServerDraining
 	} else {
@@ -460,6 +479,7 @@ func (s *Store) AckCommand(_ context.Context, agentID, commandID string, ack dom
 }
 
 func cloneServer(value domain.Server) domain.Server {
+	value.Capabilities = value.Capabilities.Clone()
 	value.Labels = cloneMap(value.Labels)
 	value.GPUs = cloneGPUs(value.GPUs)
 	value.Containers = cloneContainers(value.Containers)

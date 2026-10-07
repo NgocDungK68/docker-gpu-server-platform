@@ -10,7 +10,6 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
-	"time"
 
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent"
 	agentconfig "github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent/config"
@@ -47,35 +46,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer docker.Close()
-	gpuReader, nvmlError := gpu.New()
-	if nvmlError == nil {
-		defer gpuReader.Close()
-	}
+	gpuReader := gpu.NewRecovering()
+	defer gpuReader.Close()
 	checkCtx, cancelCheck := context.WithTimeout(context.Background(), configuration.RequestTimeout)
-	compatibility := agent.Preflight(checkCtx, docker, gpuReader, nvmlError)
+	compatibility := agent.Preflight(checkCtx, docker, gpuReader, nil, configuration.MachineID)
 	cancelCheck()
-	if *checkOnly || compatibility.Status != agent.PlatformSupported {
-		_ = json.NewEncoder(os.Stdout).Encode(compatibility)
-		if compatibility.Status != agent.PlatformSupported {
-			os.Exit(1)
-		}
-	}
-	collector := agent.NewInventoryCollector(docker, gpuReader, agent.ProcCgroupResolver{}, configuration.InventoryPolicy)
 	if *checkOnly {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := docker.Ping(ctx); err != nil {
-			logger.Error("Docker Engine preflight failed", "error", err)
+		_ = json.NewEncoder(os.Stdout).Encode(compatibility)
+		if !compatibility.ManagedExecutionReady {
 			os.Exit(1)
 		}
-		report, err := collector.Snapshot(ctx, 1)
-		if err != nil {
-			logger.Error("inventory preflight failed", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("agent preflight passed", "docker_version", report.DockerVersion, "gpus", len(report.GPUs), "containers", len(report.Containers), "gpu_processes", len(report.Processes))
 		return
 	}
+	logger.Info("Agent capability discovery", "mode", compatibility.OperatingMode, "managed_execution_ready", compatibility.ManagedExecutionReady, "reasons", compatibility.Reasons)
+	collector := agent.NewInventoryCollector(docker, gpuReader, agent.ProcCgroupResolver{}, configuration.InventoryPolicy)
 	controlPlane, err := agentcp.New(configuration.ControlPlaneURL, configuration.RequestTimeout, agentcp.TLSConfig{
 		CAFile: configuration.TLSCAFile, CertFile: configuration.TLSCertFile, KeyFile: configuration.TLSKeyFile,
 	})

@@ -113,6 +113,22 @@ func (r *Reader) Close() error {
 	return nil
 }
 
+// DriverInfo reports driver compatibility, not an installed host CUDA Toolkit.
+func (r *Reader) DriverInfo(ctx context.Context) (string, string) {
+	if ctx.Err() != nil || !r.initialized {
+		return "", ""
+	}
+	driver, ret := nvml.SystemGetDriverVersion()
+	if ret != nvml.SUCCESS {
+		driver = ""
+	}
+	cuda := ""
+	if version, ret := nvml.SystemGetCudaDriverVersion_v2(); ret == nvml.SUCCESS && version > 0 {
+		cuda = fmt.Sprintf("%d.%d", version/1000, (version%1000)/10)
+	}
+	return driver, cuda
+}
+
 func processName(pid int) string {
 	content, err := os.ReadFile(fmt.Sprintf("/proc/%d/comm", pid))
 	if err != nil {

@@ -87,10 +87,17 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 	result := make([]candidate, 0)
 	online, model, healthy, available, vram := false, false, false, false, false
 	external, unknown := false, false
+	executionUnavailable := false
 	sameOrganization := false
 	for _, server := range servers {
-		if !domain.SameOrganization(job.OrganizationID,server.OrganizationID) { continue }
+		if !domain.SameOrganization(job.OrganizationID, server.OrganizationID) {
+			continue
+		}
 		sameOrganization = true
+		if server.Capabilities == nil || !server.Capabilities.ManagedExecutionReady {
+			executionUnavailable = true
+			continue
+		}
 		if !server.Schedulable(now, s.offlineAfter) {
 			continue
 		}
@@ -123,6 +130,8 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 	switch {
 	case !sameOrganization:
 		reason = "no server satisfies organization ownership"
+	case !online && executionUnavailable:
+		reason = "managed GPU execution unavailable"
 	case !online:
 		reason = "no online agent with fresh inventory (offline, drained or inventory unavailable)"
 	case !model:

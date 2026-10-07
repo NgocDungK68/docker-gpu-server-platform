@@ -1,18 +1,22 @@
 package domain
 
-import "time"
+import (
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/platform"
+	"time"
+)
 
 // InventoryReport and CommandAckRequest are internal application/persistence
 // values. The external Agent wire contract lives in agentprotocol/v1.
 type InventoryReport struct {
-	Host          HostInfo     `json:"host"`
-	Sequence      uint64       `json:"sequence"`
-	ObservedAt    time.Time    `json:"observedAt"`
-	GPUs          []GPU        `json:"gpus"`
-	Containers    []Container  `json:"containers"`
-	Processes     []GPUProcess `json:"processes,omitempty"`
-	ReceivedAt    time.Time    `json:"-"`
-	DockerVersion string       `json:"dockerVersion,omitempty"`
+	Capabilities  *platform.Capabilities `json:"capabilities,omitempty"`
+	Host          HostInfo               `json:"host"`
+	Sequence      uint64                 `json:"sequence"`
+	ObservedAt    time.Time              `json:"observedAt"`
+	GPUs          []GPU                  `json:"gpus"`
+	Containers    []Container            `json:"containers"`
+	Processes     []GPUProcess           `json:"processes,omitempty"`
+	ReceivedAt    time.Time              `json:"-"`
+	DockerVersion string                 `json:"dockerVersion,omitempty"`
 }
 
 type CommandAckRequest struct {

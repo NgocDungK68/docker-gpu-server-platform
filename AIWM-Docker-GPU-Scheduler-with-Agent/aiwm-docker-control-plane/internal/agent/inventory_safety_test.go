@@ -17,7 +17,7 @@ func TestUnattributedTelemetryBlocksPlacement(t *testing.T) {
 			} else {
 				g.UtilizationPct = 5
 			}
-			collector := NewInventoryCollector(&fakeRuntime{}, fakeGPUReader{gpus: []agentv1.GPU{g}}, nil)
+			collector := newTestCollector(&fakeRuntime{}, fakeGPUReader{gpus: []agentv1.GPU{g}}, nil)
 			if err := collector.GPUsAvailable(context.Background(), []string{g.UUID}, "new"); !errors.Is(err, ErrUnsafeGPU) {
 				t.Fatalf("unattributed %s must block placement: %v", metric, err)
 			}
@@ -40,7 +40,7 @@ func TestDockerNumericAndUnknownDeviceMapping(t *testing.T) {
 			g0, g1 := testGPU("GPU-0"), testGPU("GPU-1")
 			g1.Index = 1
 			runtime := &fakeRuntime{containers: []RuntimeContainer{{ID: "external", State: "running", GPUIndexes: tc.indexes, GPUUUIDs: tc.uuids}}}
-			collector := NewInventoryCollector(runtime, fakeGPUReader{gpus: []agentv1.GPU{g0, g1}}, nil)
+			collector := newTestCollector(runtime, fakeGPUReader{gpus: []agentv1.GPU{g0, g1}}, nil)
 			report, err := collector.Snapshot(context.Background(), 1)
 			if err != nil {
 				t.Fatal(err)

@@ -16,7 +16,7 @@ func fixture(t *testing.T) (*Store, time.Time) {
 	t.Helper()
 	s := New()
 	now := time.Now().UTC()
-	_, err := s.UpsertServer(context.Background(), domain.Server{OrganizationID: "test-org", ID: "s", MachineID: "m", Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
+	_, err := s.UpsertServer(context.Background(), domain.Server{OrganizationID: "test-org", ID: "s", MachineID: "m", Capabilities: fullAgentCapabilities(), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now,
 		GPUs: []domain.GPU{{UUID: "GPU-0", Model: "A100", MemoryTotalMiB: 40000, Healthy: true, State: domain.GPUFree}}})
 	if err != nil {
 		t.Fatal(err)

@@ -5,6 +5,10 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"time"
+
+	agentv1 "github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agentprotocol/v1"
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/platform"
 )
 
 type CompatibilityStatus string
@@ -16,44 +20,27 @@ const (
 )
 
 type RuntimeCompatibility struct {
-	Version       string `json:"version"`
-	APIVersion    string `json:"apiVersion"`
-	OS            string `json:"os"`
-	NVIDIARuntime bool   `json:"nvidiaRuntime"`
+	Version       string
+	APIVersion    string
+	OS            string
+	NVIDIARuntime bool
 }
 
-// RuntimeProbe là boundary đọc capability; không pull/start container trong preflight.
+// RuntimeProbe reads runtime configuration without starting a container.
 type RuntimeProbe interface {
 	Compatibility(context.Context) (RuntimeCompatibility, error)
 }
 
 type CompatibilityReport struct {
-	Status             CompatibilityStatus  `json:"status"`
-	Schedulable        bool                 `json:"schedulable"`
-	OS                 string               `json:"os"`
-	Architecture       string               `json:"architecture"`
-	KernelVersion      string               `json:"kernelVersion"`
-	CgroupMode         string               `json:"cgroupMode"`
-	MachineIDAvailable bool                 `json:"machineIdAvailable"`
-	Docker             RuntimeCompatibility `json:"docker"`
-	DockerReachable    bool                 `json:"dockerReachable"`
-	NVMLAvailable      bool                 `json:"nvmlAvailable"`
-	GPUCount           int                  `json:"gpuCount"`
-	Issues             []string             `json:"issues"`
+	platform.Capabilities
+	Status      CompatibilityStatus `json:"status"`
+	Schedulable bool                `json:"schedulable"`
 }
 
-// Preflight kiểm tra điều kiện nền tảng; inventory/health/occupancy vẫn quyết định placement.
-func Preflight(ctx context.Context, docker DockerRuntime, gpus GPUReader, nvmlError error) CompatibilityReport {
-	r := CompatibilityReport{Status: PlatformSupported, OS: runtime.GOOS, Architecture: runtime.GOARCH, CgroupMode: "UNKNOWN", Issues: []string{}}
-	if runtime.GOOS != "linux" {
-		r.Status = PlatformUnsupported
-		r.Issues = append(r.Issues, "Production NVML adapter chỉ hỗ trợ Linux")
-		return r
-	}
+func discoverPlatform() platform.Capabilities {
+	r := platform.Capabilities{OS: runtime.GOOS, Architecture: runtime.GOARCH, CgroupMode: "UNKNOWN"}
 	if content, err := os.ReadFile("/etc/machine-id"); err == nil && strings.TrimSpace(string(content)) != "" {
 		r.MachineIDAvailable = true
-	} else {
-		r.Issues = append(r.Issues, "Không đọc được /etc/machine-id hợp lệ; cần technical identity ổn định")
 	}
 	if content, err := os.ReadFile("/proc/sys/kernel/osrelease"); err == nil {
 		r.KernelVersion = strings.TrimSpace(string(content))
@@ -63,46 +50,74 @@ func Preflight(ctx context.Context, docker DockerRuntime, gpus GPUReader, nvmlEr
 	} else if _, err := os.Stat("/sys/fs/cgroup"); err == nil {
 		r.CgroupMode = "v1"
 	}
-	if err := docker.Ping(ctx); err != nil {
-		r.Issues = append(r.Issues, "Docker/socket không truy cập được: "+err.Error())
-	} else {
-		r.DockerReachable = true
-		if probe, ok := docker.(RuntimeProbe); ok {
-			info, err := probe.Compatibility(ctx)
-			r.Docker = info
-			if err != nil {
-				r.Issues = append(r.Issues, "Không đọc được Docker capability: "+err.Error())
-			} else {
-				if info.OS != "linux" {
-					r.Issues = append(r.Issues, "Docker daemon không chạy Linux containers")
-				}
-				if !info.NVIDIARuntime {
-					r.Issues = append(r.Issues, "Docker chưa công bố runtime nvidia; chưa xác minh được GPU container runtime")
-				}
-			}
-		} else {
-			r.Issues = append(r.Issues, "Runtime adapter chưa hỗ trợ preflight capability")
-		}
-	}
-	if nvmlError != nil {
-		r.Issues = append(r.Issues, "NVML không khả dụng: "+nvmlError.Error())
-	} else if gpus == nil {
-		r.Issues = append(r.Issues, "Thiếu GPUReader")
-	} else {
-		devices, _, err := gpus.Snapshot(ctx)
-		if err != nil {
-			r.Issues = append(r.Issues, "GPU discovery lỗi: "+err.Error())
-		} else {
-			r.NVMLAvailable = true
-			r.GPUCount = len(devices)
-			if len(devices) == 0 {
-				r.Issues = append(r.Issues, "NVML không phát hiện GPU")
-			}
-		}
-	}
-	if len(r.Issues) > 0 {
-		r.Status = PlatformDegraded
-	}
-	r.Schedulable = r.Status == PlatformSupported
+	r.AgentOperational = r.MachineIDAvailable
 	return r
+}
+
+// Preflight is diagnostic; degraded execution readiness is not a daemon startup error.
+func Preflight(ctx context.Context, docker DockerRuntime, gpus GPUReader, _ error, machineID ...string) CompatibilityReport {
+	base := discoverPlatform()
+	if len(machineID) > 0 && strings.TrimSpace(machineID[0]) != "" {
+		base.MachineIDAvailable = true
+		base.AgentOperational = true
+	}
+	snapshot := collectSources(ctx, docker, gpus, base)
+	report := CompatibilityReport{Capabilities: snapshot.capabilities, Status: PlatformDegraded}
+	if report.ManagedExecutionReady {
+		report.Status = PlatformSupported
+	} else if report.OS != "linux" || report.Architecture != "amd64" {
+		report.Status = PlatformUnsupported
+	}
+	report.Schedulable = report.ManagedExecutionReady
+	return report
+}
+
+type sourceSnapshot struct {
+	capabilities platform.Capabilities
+	gpus         []agentv1.GPU
+	processes    []agentv1.GPUProcess
+	containers   []RuntimeContainer
+}
+
+// Each source gets its own bounded request. Failure never becomes an authoritative empty source.
+func collectSources(ctx context.Context, docker DockerRuntime, gpus GPUReader, base platform.Capabilities) sourceSnapshot {
+	result := sourceSnapshot{capabilities: base}
+	r := &result.capabilities
+	if gpus != nil {
+		readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		devices, processes, err := gpus.Snapshot(readCtx)
+		if err == nil {
+			result.gpus, result.processes = devices, processes
+			r.NVMLAvailable, r.GPUInventoryAvailable, r.GPUCount = true, true, len(devices)
+			if source, ok := gpus.(interface {
+				DriverInfo(context.Context) (string, string)
+			}); ok {
+				r.NVIDIADriverVersion, r.CUDADriverVersion = source.DriverInfo(readCtx)
+			}
+		}
+		cancel()
+	}
+	if docker != nil {
+		readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		containers, err := docker.ListContainers(readCtx)
+		if err == nil {
+			result.containers = containers
+			r.DockerAvailable = true
+		}
+		cancel()
+		// Missing runtime support only blocks execution, not usable Docker inventory.
+		if r.DockerAvailable {
+			probeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			if probe, ok := docker.(RuntimeProbe); ok {
+				if info, err := probe.Compatibility(probeCtx); err == nil {
+					r.DockerVersion, r.DockerAPIVersion, r.DockerOS, r.NVIDIAContainerSupport = info.Version, info.APIVersion, info.OS, info.NVIDIARuntime
+				}
+			} else {
+				r.DockerVersion, _ = docker.Version(probeCtx)
+			}
+			cancel()
+		}
+	}
+	r.Normalize()
+	return result
 }
