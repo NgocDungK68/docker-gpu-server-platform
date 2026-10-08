@@ -20,6 +20,10 @@ export type JobStatus =
 export type SchedulingStrategy = "first-fit" | "best-fit" | "bin-pack" | "fragmentation-aware";
 
 export interface ClusterSummary {
+  serversOffline: number;
+  gpusReserved: number;
+  gpusAllocated: number;
+  gpusUnhealthy: number;
   serversTotal: number;
   serversOnline: number;
   gpusTotal: number;
@@ -61,7 +65,34 @@ export interface Container {
   exitCode?: number;
 }
 
+export type OperatingMode = "FULL" | "GPU_OBSERVE_ONLY" | "DOCKER_OBSERVE_ONLY" | "DEGRADED";
+
+export interface ServerCapabilities {
+  agentOperational: boolean;
+  operatingMode: OperatingMode;
+  os: string;
+  architecture: string;
+  kernelVersion?: string;
+  cgroupMode?: string;
+  machineIdAvailable: boolean;
+  dockerAvailable: boolean;
+  dockerVersion?: string;
+  dockerApiVersion?: string;
+  dockerOs?: string;
+  gpuInventoryAvailable: boolean;
+  nvmlAvailable: boolean;
+  gpuCount: number;
+  nvidiaDriverVersion?: string;
+  cudaDriverVersion?: string;
+  nvidiaContainerSupport: boolean;
+  managedExecutionReady: boolean;
+  reasons: string[];
+}
+
 export interface Server {
+  capabilities?: ServerCapabilities;
+
+  organizationId: string;
   schedulable: boolean;
   schedulingReason: string;
   host: { hostname: string; os: string; architecture: string; cpuCount: number; memoryTotalMiB: number };
@@ -83,6 +114,7 @@ export interface Server {
 }
 
 export interface GPUInventoryItem {
+  organizationId: string;
   serverId: string;
   serverName: string;
   serverStatus: ServerStatus;
@@ -107,18 +139,38 @@ export interface ResourceRequest {
 }
 
 export interface Assignment {
+	startAt: string;
+	endAt: string;
   serverId: string;
   gpuUuids: string[];
   commandId: string;
   assignedAt: string;
-  reservationState: "RESERVED" | "ALLOCATED" | "RELEASED";
+  reservationState: "PLANNED" | "RESERVED" | "ALLOCATED" | "RELEASED";
   releasedAt?: string;
   strategy: SchedulingStrategy;
   score: number;
   reason: string;
 }
 
+export interface TrainingState {
+  checkpointStatus: "" | "NONE" | "REQUESTED" | "SAVING" | "AVAILABLE" | "FAILED";
+  latestCheckpointURI?: string;
+  checkpointCreatedAt?: string;
+  checkpointStep?: number;
+  checkpointWarningAt?: string;
+  artifactStatus: "" | "NONE" | "SAVING" | "READY" | "FAILED";
+  finalArtifactURI?: string;
+  artifactCreatedAt?: string;
+  resumeCheckpointURI?: string;
+  resumeFromJobId?: string;
+}
 export interface Job extends Partial<AllocationIntent> {
+  training?: TrainingState;
+  terminationReason?: "COMPLETED" | "TIME_LIMIT" | "USER_CANCELLED" | "EXECUTION_ERROR" | "SYSTEM_ERROR";
+  resumable?: boolean;
+  requestedStartAt: string;
+  requestedEndAt: string;
+  organizationId: string;
   policy: PolicyDecision;
   necessityLabel: string;
   id: string;
@@ -153,7 +205,9 @@ export interface AllocationIntent {
   neededAt: string;
   ttlSeconds: number;
 }
+export type PerformanceProfile = "AUTO" | "HIGH_PERFORMANCE";
 export interface CreateJobInput extends AllocationIntent {
+  resumeFromJobId?: string;
   name: string;
   image: string;
   backend: "DOCKER";
@@ -162,7 +216,7 @@ export interface CreateJobInput extends AllocationIntent {
   resources: {
     gpuCount: number;
     minVramMiB: number;
-    performanceProfile: string;
+    performanceProfile: PerformanceProfile;
     fp8Required: boolean;
     cpuMilli?: number;
     memoryMiB?: number;
@@ -188,6 +242,9 @@ export interface PolicyDecision {
   evaluatedAt: string;
 }
 export interface JobPreview {
+  requestedStartAt: string;
+  requestedEndAt: string;
+  planningStatus: "AVAILABLE" | "CONFLICT";
   workloadType: WorkloadType;
   policyStatus: PolicyDecision["status"];
   policyReason: string;

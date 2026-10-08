@@ -1,0 +1,16 @@
+{
+  "name": "real-gpu-smoke",
+  "image": "nvidia/cuda:12.4.1-base-ubuntu22.04",
+  "command": ["sh", "-c", "nvidia-smi -L && sleep 300"],
+  "resources": {
+    "gpuCount": 1,
+    "minVramMiB": 1024,
+    "performanceProfile": "general",
+    "fp8Required": false
+  },
+  "workloadType": "INFERENCE",
+  "necessityLevel": "NECESSITY_4",
+  "necessityReason": "EXPERIMENT",
+  "systemImportance": "NORMAL",
+  "ttlSeconds": 3600
+}

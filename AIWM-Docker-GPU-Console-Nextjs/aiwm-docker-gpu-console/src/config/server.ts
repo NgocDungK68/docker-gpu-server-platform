@@ -4,5 +4,5 @@ export function getServerConfig() {
   if (!["http:", "https:"].includes(backend.protocol) || backend.username || backend.password) throw new Error("Invalid backend URL");
   const requestTimeoutMs = Number(process.env.AIWM_API_TIMEOUT_MS ?? 30000);
   if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) throw new Error("Invalid API timeout");
-  return { backend, requestTimeoutMs, apiToken: process.env.AIWM_API_TOKEN ?? "" };
+  return { backend, requestTimeoutMs, secureCookies: process.env.AIWM_SESSION_COOKIE_SECURE === "true" };
 }

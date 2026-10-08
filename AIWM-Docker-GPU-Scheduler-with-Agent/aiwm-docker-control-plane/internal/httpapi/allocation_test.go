@@ -5,13 +5,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/domain"
 )
 
 func validAllocationRequest() domain.CreateJobRequest {
 	fp8 := false
-	return domain.CreateJobRequest{AllocationIntent: domain.AllocationIntent{WorkloadType: domain.WorkloadTraining, NecessityLevel: domain.Necessity2, NecessityReason: "GO_LIVE_90_DAYS", SystemImportance: domain.ImportanceImportant, NeededAt: "2026-09-09T09:00:00+07:00", TTLSeconds: 3600},
+	return domain.CreateJobRequest{AllocationIntent: domain.AllocationIntent{WorkloadType: domain.WorkloadTraining, NecessityLevel: domain.Necessity2, NecessityReason: "GO_LIVE_90_DAYS", SystemImportance: domain.ImportanceImportant, NeededAt: time.Now().UTC().Format(time.RFC3339), TTLSeconds: 3600},
 		Name: "valid-job", Image: "alpine:3.21", Resources: domain.AllocationResources{GPUCount: 1, MinVRAMMiB: 1024, PerformanceProfile: "general", FP8Required: &fp8}}
 }
 func TestAllocationContractRejectsPlacementAndInvalidJSONTypes(t *testing.T) {
@@ -55,6 +56,38 @@ func TestPreviewOptionsAndAuth(t *testing.T) {
 		}
 		if strings.Contains(w.Body.String(), "auxiliaryScore") || strings.Contains(w.Body.String(), "gpuUuids") || strings.Contains(w.Body.String(), "ResolvedModels") {
 			t.Fatal("internal placement leaked")
+		}
+	}
+}
+
+func TestFutureJobTimeContract(t *testing.T) {
+	api := testAPI()
+	input := validAllocationRequest()
+	input.NeededAt = time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+	raw, _ := json.Marshal(input)
+	for _, path := range []string{"/api/v1/jobs/preview", "/api/v1/jobs"} {
+		r := httptest.NewRequest("POST", path, strings.NewReader(string(raw)))
+		r.Header.Set("Authorization", "Bearer public-test")
+		w := httptest.NewRecorder()
+		api.ServeHTTP(w, r)
+		if w.Code != 200 && w.Code != 201 {
+			t.Fatalf("%d %s", w.Code, w.Body)
+		}
+		var envelope struct {
+			Data struct {
+				RequestedStartAt, RequestedEndAt time.Time
+				Status, PlanningStatus           string
+			}
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &envelope); err != nil {
+			t.Fatal(err)
+		}
+		start, _ := time.Parse(time.RFC3339Nano, input.NeededAt)
+		if !envelope.Data.RequestedStartAt.Equal(start) || !envelope.Data.RequestedEndAt.Equal(start.Add(time.Hour)) {
+			t.Fatalf("bad time contract: %s", w.Body)
+		}
+		if path == "/api/v1/jobs" && envelope.Data.Status != "QUEUED" {
+			t.Fatal("submit executed immediately")
 		}
 	}
 }

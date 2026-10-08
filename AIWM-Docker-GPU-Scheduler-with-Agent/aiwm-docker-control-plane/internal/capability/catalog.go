@@ -22,14 +22,24 @@ type Resolver interface {
 	Profiles() []Profile
 	Resolve(profile string, fp8 bool) ([]string, error)
 }
-type Catalog struct{ profiles []Profile }
+type Catalog struct {
+	profiles       []Profile
+	legacyProfiles []Profile
+}
 
 // Default contains centrally curated compatibility groups, not measured performance equivalence.
 func Default() *Catalog {
 	a100 := []Model{{"A100", false}, {"NVIDIA-A100-80GB", false}, {"NVIDIA A100-SXM4-40GB", false}, {"NVIDIA A100-SXM4-80GB", false}, {"NVIDIA A100 80GB PCIe", false}}
 	t4 := []Model{{"T4", false}, {"Tesla T4", false}, {"NVIDIA T4", false}}
 	h100 := []Model{{"H100", true}, {"NVIDIA H100 80GB HBM3", true}, {"NVIDIA H100 PCIe", true}}
-	return New([]Profile{{"general", "GPU tổng quát", append(append(t4, a100...), h100...)}, {"a100-equivalent", "A100-equivalent", a100}, {"h100-equivalent", "H100-equivalent", h100}})
+	h200 := []Model{{"H200", true}, {"NVIDIA H200", true}, {"NVIDIA H200 NVL", true}}
+	l40s := []Model{{"L40S", true}, {"NVIDIA L40S", true}}
+	high := append(append([]Model{}, h100...), h200...)
+	all := append(append(append(append([]Model{}, t4...), a100...), high...), l40s...)
+	c := New([]Profile{{"AUTO", "Auto", all}, {"HIGH_PERFORMANCE", "Hiệu năng cao", high}})
+	// Compatibility for existing API clients; never advertised as new form options.
+	c.legacyProfiles = []Profile{{"general", "GPU tổng quát", append(append(append([]Model{}, t4...), a100...), h100...)}, {"a100-equivalent", "A100-equivalent", a100}, {"h100-equivalent", "H100-equivalent", h100}}
+	return c
 }
 func New(profiles []Profile) *Catalog {
 	copyProfiles := append([]Profile(nil), profiles...)
@@ -46,7 +56,10 @@ func (c *Catalog) Profiles() []Profile {
 	return result
 }
 func (c *Catalog) Resolve(profile string, fp8 bool) ([]string, error) {
-	for _, p := range c.profiles {
+	if profile == "AUTO" && !fp8 {
+		return nil, nil // Unrestricted model matching; not an inventory allowlist.
+	}
+	for _, p := range append(append([]Profile{}, c.profiles...), c.legacyProfiles...) {
 		if p.ID != profile {
 			continue
 		}

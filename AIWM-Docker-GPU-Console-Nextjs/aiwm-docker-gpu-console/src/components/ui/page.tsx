@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils/cn";
 
 export function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string; title: string; description?: string; actions?: React.ReactNode }) {
-  return <header className="page-header"><div className="min-w-0">{eyebrow && <p className="mb-1 text-xs font-bold uppercase tracking-[0.14em] text-[var(--brand-red-dark)]">{eyebrow}</p>}<h1 className="text-2xl font-bold tracking-tight text-slate-950 lg:text-[1.75rem]">{title}</h1>{description && <p className="mt-1.5 max-w-3xl text-sm leading-6 text-slate-600">{description}</p>}</div>{actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}</header>;
+  return <header className="page-header"><div className="min-w-0">{eyebrow && <p className="mb-1 text-xs font-bold uppercase tracking-[0.14em] text-[var(--brand-red-dark)]">{eyebrow}</p>}<h1 className="text-2xl font-bold tracking-tight text-slate-950 lg:text-[1.75rem]">{title}</h1>{description && <p className="mt-1 max-w-3xl text-sm leading-5 text-slate-500">{description}</p>}</div>{actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}</header>;
 }
 
 export function EmptyState({ icon, title, description, action, className }: { icon: React.ReactNode; title: string; description: string; action?: React.ReactNode; className?: string }) {
@@ -9,7 +9,7 @@ export function EmptyState({ icon, title, description, action, className }: { ic
 }
 
 export function ErrorState({ message, onRetry }: { message?: string; onRetry?: () => void }) {
-  return <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800"><p className="font-semibold">Không tải được dữ liệu</p><p className="mt-1">{message ?? "Kiểm tra Control Plane và thử lại."}</p>{onRetry && <button className="mt-3 font-semibold underline" onClick={onRetry}>Tải lại</button>}</div>;
+  return <div className="rounded-xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-800"><p className="font-semibold">Không tải được dữ liệu</p><p className="mt-1">{message ?? "Kiểm tra kết nối và thử lại."}</p>{onRetry && <button className="mt-3 font-semibold underline" onClick={onRetry}>Tải lại</button>}</div>;
 }
 
 export function TableSkeleton({ rows = 5 }: { rows?: number }) {

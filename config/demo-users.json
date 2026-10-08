@@ -1,0 +1,16 @@
+{
+  "warning": "DEMO / DEVELOPMENT ONLY - DO NOT USE IN PRODUCTION",
+  "organizations": [
+    {"code": "VTT", "name": "Viettel Telecom"},
+    {"code": "VDS", "name": "Viettel Digital Services"},
+    {"code": "VTNET", "name": "Viettel Network"},
+    {"code": "VTIT", "name": "Viettel Information Technology"}
+  ],
+  "users": [
+    {"username": "admin", "password": "AIWM-Demo-2026!", "role": "ADMIN", "organizationCode": "VTT"},
+    {"username": "vtt", "password": "AIWM-Demo-2026!", "role": "ORGANIZATION_USER", "organizationCode": "VTT"},
+    {"username": "vds", "password": "AIWM-Demo-2026!", "role": "ORGANIZATION_USER", "organizationCode": "VDS"},
+    {"username": "vtnet", "password": "AIWM-Demo-2026!", "role": "ORGANIZATION_USER", "organizationCode": "VTNET"},
+    {"username": "vtit", "password": "AIWM-Demo-2026!", "role": "ORGANIZATION_USER", "organizationCode": "VTIT"}
+  ]
+}

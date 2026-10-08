@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -35,6 +34,8 @@ type ResourceMatch struct {
 	UnsatisfiedReason    string   `json:"unsatisfiedReason,omitempty"`
 }
 type JobPreview struct {
+	domain.TimeWindow
+	PlanningStatus   string              `json:"planningStatus"`
 	WorkloadType     domain.WorkloadType `json:"workloadType"`
 	PolicyStatus     domain.PolicyStatus `json:"policyStatus"`
 	PolicyReason     string              `json:"policyReason"`
@@ -48,6 +49,10 @@ type JobPreview struct {
 
 // prepareJob is shared by preview and submit; client evaluation results are never accepted.
 func (c *ControlPlane) prepareJob(ctx context.Context, r domain.CreateJobRequest) (domain.Job, error) {
+	p, authenticated := domain.CurrentPrincipal(ctx)
+	if c.metadata != nil && !authenticated {
+		return domain.Job{}, domain.ErrUnauthorized
+	}
 	if r.Backend == "" {
 		r.Backend = domain.BackendDocker
 	}
@@ -61,11 +66,28 @@ func (c *ControlPlane) prepareJob(ctx context.Context, r domain.CreateJobRequest
 	}
 	resources.ResolvedModels = models
 	needed, _ := time.Parse(time.RFC3339, r.NeededAt)
-	r.NeededAt = needed.UTC().Format(time.RFC3339)
+	r.NeededAt = needed.UTC().Format(time.RFC3339Nano)
 	now := c.now().UTC()
-	job := domain.Job{AllocationIntent: r.AllocationIntent, Name: strings.TrimSpace(r.Name), Image: r.Image, Backend: r.Backend,
+	if needed.Before(now.Add(-time.Minute)) {
+		return domain.Job{}, &domain.ValidationError{Fields: map[string]string{"neededAt": "Thời điểm bắt đầu không được ở quá khứ quá 60 giây"}}
+	}
+	job := domain.Job{OrganizationID: p.User.OrganizationID, AllocationIntent: r.AllocationIntent, Name: strings.TrimSpace(r.Name), Image: r.Image, Backend: r.Backend,
 		Command: r.Command, Environment: r.Environment, Resources: resources, Strategy: c.scheduler.defaultStrategy,
 		Status: domain.JobQueued, CreatedAt: now, UpdatedAt: now}
+	window := job.RequestedWindow()
+	if !window.Valid() || !now.Before(window.EndAt) {
+		return domain.Job{}, &domain.ValidationError{Fields: map[string]string{"ttlSeconds": "Khoảng thời gian sử dụng phải hợp lệ và chưa kết thúc"}}
+	}
+	if r.ResumeFromJobID != "" {
+		source, e := c.GetJob(ctx, r.ResumeFromJobID)
+		if e != nil {
+			return domain.Job{}, e
+		}
+		if c.objects == nil || !source.Resumable() || source.OrganizationID != job.OrganizationID || job.WorkloadType != domain.WorkloadTraining {
+			return domain.Job{}, domain.ErrConflict
+		}
+		job.Training.ResumeFromJobID, job.Training.ResumeCheckpointURI = source.ID, source.Training.LatestCheckpointURI
+	}
 	job.Policy, err = c.policy.Evaluate(ctx, job, now)
 	return job, err
 }
@@ -87,59 +109,67 @@ func (c *ControlPlane) PreviewJob(ctx context.Context, r domain.CreateJobRequest
 	if job.Policy.WithinQuota {
 		quota = "Trong hạn mức hiện tại"
 	}
-	return JobPreview{job.WorkloadType, job.Policy.Status, job.Policy.Reason, policy.NecessityLabel(job.NecessityLevel),
+	planningStatus := "CONFLICT"
+	if match.Satisfiable {
+		planningStatus = "AVAILABLE"
+	}
+	return JobPreview{job.RequestedWindow(), planningStatus, job.WorkloadType, job.Policy.Status, job.Policy.Reason, policy.NecessityLabel(job.NecessityLevel),
 		sizing, quota, job.Policy.Source, match, job.Policy.EvaluatedAt}, nil
 }
+
+// matchJob uses the same greedy planner without persisting its hypothetical result.
 func (c *ControlPlane) matchJob(ctx context.Context, job domain.Job) (ResourceMatch, error) {
 	servers, err := c.repository.ListServers(ctx)
 	if err != nil {
 		return ResourceMatch{}, err
 	}
-	now := c.now().UTC()
-	result := ResourceMatch{RecommendedGPUModels: []string{}}
-	models := map[string]bool{}
-	for _, server := range servers {
-		if !server.Schedulable(now, c.offlineAfter) || !labelsMatch(server.Labels, job.ServerSelector) {
-			continue
-		}
-		matching := matchingGPUs(server.GPUs, job.Resources)
-		if len(matching) > result.MatchedGPUCount {
-			result.MatchedGPUCount = len(matching)
-		}
-		for _, gpu := range matching {
-			models[gpu.Model] = true
-		}
-	}
-	for model := range models {
-		result.RecommendedGPUModels = append(result.RecommendedGPUModels, model)
-	}
-	sort.Strings(result.RecommendedGPUModels)
-	_, err = c.scheduler.Plan(job, servers, now)
-	if errors.Is(err, domain.ErrInsufficientGPU) {
-		result.UnsatisfiedReason = friendlyPlacementReason(err.Error())
-		result.RecommendationText = "Chờ tài nguyên: " + result.UnsatisfiedReason
-		return result, nil
-	}
+	jobs, err := c.repository.ListJobs(ctx)
 	if err != nil {
 		return ResourceMatch{}, err
 	}
-	result.Satisfiable = true
-	result.RecommendationText = fmt.Sprintf("Có thể đáp ứng %d GPU trên một server; cấp phát theo thứ tự hàng đợi.", job.Resources.GPUCount)
-	return result, nil
-}
-func friendlyPlacementReason(reason string) string {
-	for _, item := range [][2]string{
-		{"no online agent", "Chưa có server online với inventory mới, hoặc server đang drain."},
-		{"model unavailable", "Chưa có GPU đáp ứng profile hiệu năng và yêu cầu FP8."},
-		{"no healthy", "GPU phù hợp chưa healthy."},
-		{"external workload", "Workload External đang chiếm GPU; cần chờ GPU khác."},
-		{"ownership unknown", "GPU có occupancy chưa xác định nên chưa được cấp phát."},
-		{"reserved or allocated", "GPU phù hợp đang được reserve hoặc cấp phát."},
-		{"VRAM", "Chưa đủ VRAM khả dụng trên mỗi GPU."},
-	} {
-		if strings.Contains(reason, item[0]) {
-			return item[1]
-		}
+	enabled, err := c.enabledOrganizations(ctx)
+	if err != nil {
+		return ResourceMatch{}, err
 	}
-	return "Chưa đủ số GPU phù hợp trên cùng một server."
+	job.ID = "preview-candidate" // Stored IDs always use the job- prefix.
+	jobs = append(jobs, job)
+	plans, err := c.planReservations(ctx, jobs, servers, enabled, c.now().UTC())
+	if err != nil {
+		return ResourceMatch{}, err
+	}
+	result := ResourceMatch{RecommendedGPUModels: []string{}}
+	for _, entry := range plans {
+		if entry.JobID != job.ID {
+			continue
+		}
+		if entry.Placement == nil {
+			result.UnsatisfiedReason = entry.Reason
+			result.RecommendationText = entry.Reason
+			return result, nil
+		}
+		result.Satisfiable = true
+		result.MatchedGPUCount = len(entry.Placement.GPUUUIDs)
+		models := map[string]bool{}
+		for _, server := range servers {
+			if server.ID != entry.Placement.ServerID {
+				continue
+			}
+			for _, gpu := range server.GPUs {
+				for _, uuid := range entry.Placement.GPUUUIDs {
+					if gpu.UUID == uuid {
+						models[gpu.Model] = true
+					}
+				}
+			}
+		}
+		for model := range models {
+			result.RecommendedGPUModels = append(result.RecommendedGPUModels, model)
+		}
+		sort.Strings(result.RecommendedGPUModels)
+		result.RecommendationText = fmt.Sprintf("Có thể giữ %d GPU trong khoảng thời gian yêu cầu; chỉ chạy khi đến giờ và kiểm tra lại tài nguyên.", job.Resources.GPUCount)
+		return result, nil
+	}
+	result.UnsatisfiedReason = waitingWindow
+	result.RecommendationText = waitingWindow
+	return result, nil
 }

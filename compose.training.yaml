@@ -1,0 +1,15 @@
+# Storage riêng cho demo checkpoint; không thay stack hoặc volume hiện có.
+services:
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${AIWM_DEMO_S3_ACCESS_KEY:-aiwm-demo-only}
+      MINIO_ROOT_PASSWORD: ${AIWM_DEMO_S3_SECRET_KEY:-AIWM-Demo-S3-2026!}
+    ports:
+      - "127.0.0.1:${AIWM_DEMO_S3_PORT:-19000}:9000"
+      - "127.0.0.1:${AIWM_DEMO_S3_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - training-artifacts:/data
+volumes:
+  training-artifacts:

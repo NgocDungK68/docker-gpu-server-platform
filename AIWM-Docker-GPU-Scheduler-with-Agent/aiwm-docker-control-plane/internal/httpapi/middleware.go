@@ -83,3 +83,6 @@ func (w *statusWriter) WriteHeader(status int) {
 	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
+
+// Unwrap lets authenticated uploads adjust deadlines through the logging writer.
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }

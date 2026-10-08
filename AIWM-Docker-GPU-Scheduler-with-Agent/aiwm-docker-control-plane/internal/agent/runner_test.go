@@ -13,7 +13,7 @@ import (
 func TestRunnerExecutesRedeliveredCommandOnlyOnce(t *testing.T) {
 	runtime := &fakeRuntime{}
 	reader := fakeGPUReader{gpus: []agentv1.GPU{testGPU("GPU-0")}}
-	inventory := NewInventoryCollector(runtime, reader, nil)
+	inventory := newTestCollector(runtime, reader, nil)
 	payload, _ := json.Marshal(agentv1.StartContainerPayload{JobID: "job-1", Name: "job-1", Image: "busybox", GPUUUIDs: []string{"GPU-0"}})
 	api := &fakeControlPlane{commands: []agentv1.Command{{ID: "cmd-1", Type: "START_CONTAINER", Payload: payload}}}
 	store := &memoryStateStore{}

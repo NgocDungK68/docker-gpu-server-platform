@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -41,9 +42,13 @@ func (s *Store) UpsertServer(_ context.Context, incoming domain.Server) (domain.
 
 	if id, ok := s.machines[incoming.MachineID]; ok {
 		existing := s.servers[id]
+		if existing.OrganizationID != incoming.OrganizationID || (incoming.OrganizationID != "" && incoming.ID != existing.ID) {
+			return domain.Server{}, domain.ErrConflict
+		}
 		existing.Name = incoming.Name
 		existing.Address = incoming.Address
 		existing.AgentVersion = incoming.AgentVersion
+		existing.Capabilities = incoming.Capabilities.Clone()
 		existing.Labels = cloneMap(incoming.Labels)
 		existing.Status = domain.ServerOnline
 		existing.InventoryReceivedAt = time.Time{}
@@ -86,6 +91,9 @@ func (s *Store) Heartbeat(_ context.Context, agentID string, at time.Time) (doma
 	if !ok {
 		return domain.Server{}, domain.ErrNotFound
 	}
+	if server.Status == domain.ServerOffline || at.Sub(server.LastHeartbeatAt) > s.offlineAfter {
+		server.InventoryReceivedAt = time.Time{}
+	}
 	server.LastHeartbeatAt = at
 	if server.Drained {
 		server.Status = domain.ServerDraining
@@ -126,12 +134,30 @@ func (s *Store) ReplaceInventory(_ context.Context, agentID string, report domai
 		report.ReceivedAt = report.ObservedAt
 	}
 	server.LastHeartbeatAt = report.ReceivedAt
-	server.InventoryReceivedAt = report.ReceivedAt
-	server.DockerVersion = report.DockerVersion
+	// nil is the pre-capability internal repository contract: both sources are complete.
+	// The HTTP/application boundary always supplies a report, even for legacy Agents.
+	gpuValid, dockerValid := true, true
+	if report.Capabilities != nil {
+		gpuValid, dockerValid = report.Capabilities.GPUInventoryAvailable, report.Capabilities.DockerAvailable
+		server.Capabilities = report.Capabilities.Clone()
+		server.Capabilities.Normalize()
+	}
+	server.InventoryReceivedAt = time.Time{}
+	if gpuValid && dockerValid {
+		server.InventoryReceivedAt = report.ReceivedAt
+	}
 	server.Host = report.Host
-	s.reconcileObservedLocked(agentID, report)
-	server.GPUs = normalizeGPUState(agentID, report.GPUs, report.Containers, report.Processes, s.jobs)
-	server.Containers = cloneContainers(report.Containers)
+	if dockerValid {
+		server.DockerVersion = report.DockerVersion
+		server.Containers = cloneContainers(report.Containers)
+	}
+	// Missing Docker observations are never evidence that a running workload disappeared.
+	if gpuValid && dockerValid {
+		s.reconcileObservedLocked(agentID, report)
+	}
+	if gpuValid {
+		server.GPUs = normalizeGPUState(agentID, report.GPUs, server.Containers, report.Processes, s.jobs)
+	}
 	if server.Drained {
 		server.Status = domain.ServerDraining
 	} else {
@@ -255,6 +281,14 @@ func (s *Store) SetJobStatus(_ context.Context, id string, status domain.JobStat
 	if job.Status.Terminal() || (status == domain.JobQueued && job.Status != domain.JobQueued) {
 		return cloneJob(job), nil
 	}
+	// Queue expiration may race activation after the controller read its snapshot.
+	// Execution failure/release must go through ACK or observed lifecycle instead.
+	if status == domain.JobFailed && job.Status != domain.JobQueued {
+		return cloneJob(job), nil
+	}
+	if status == domain.JobAssigned && (job.Status != domain.JobAssigned || job.Assignment == nil || job.Assignment.CommandID != "") {
+		return cloneJob(job), nil
+	}
 	s.transitionLocked(&job, status, reason, at)
 	if status.Terminal() {
 		s.releaseLocked(&job, at)
@@ -271,12 +305,23 @@ func (s *Store) CommitAssignment(_ context.Context, jobID string, placement doma
 	if !ok {
 		return domain.Job{}, domain.ErrNotFound
 	}
-	if job.Status != domain.JobQueued {
+	planned := job.Assignment != nil && job.Assignment.ReservationState == "PLANNED"
+	if planned {
+		a := job.Assignment
+		if job.Status != domain.JobAssigned || a.CommandID != "" || !a.Window().Contains(at) ||
+			a.ServerID != placement.ServerID || !slices.Equal(a.GPUUUIDs, placement.GPUUUIDs) || command.Type != domain.CommandStartContainer {
+			return domain.Job{}, domain.ErrConflict
+		}
+	} else if job.Status != domain.JobQueued || job.NeededAt != "" || job.TTLSeconds != 0 {
+		// Timed jobs must pass through planning. Only legacy untimed callers use the old path.
 		return domain.Job{}, domain.ErrConflict
 	}
 	server, ok := s.servers[placement.ServerID]
 	if !ok {
 		return domain.Job{}, domain.ErrNotFound
+	}
+	if !domain.SameOrganization(job.OrganizationID, server.OrganizationID) {
+		return domain.Job{}, domain.ErrConflict
 	}
 	if !server.Schedulable(at, s.offlineAfter) || job.Resources.GPUCount <= 0 || len(placement.GPUUUIDs) != job.Resources.GPUCount || command.AgentID != server.ID {
 		return domain.Job{}, domain.ErrConflict
@@ -318,11 +363,18 @@ func (s *Store) CommitAssignment(_ context.Context, jobID string, placement doma
 		}
 	}
 
-	s.transitionLocked(&job, domain.JobAssigned, placement.Reason, at)
-	job.Assignment = &domain.Assignment{
-		ServerID: placement.ServerID, GPUUUIDs: append([]string(nil), placement.GPUUUIDs...),
-		CommandID: command.ID, AssignedAt: at,
-		ReservationState: "RESERVED", Strategy: placement.Strategy, Score: placement.Score, Reason: placement.Reason,
+	if planned {
+		job = cloneJob(job)
+		job.Assignment.CommandID = command.ID
+		job.Assignment.ReservationState = "RESERVED"
+		s.transitionLocked(&job, domain.JobStarting, "Đến thời gian chạy; chờ Agent xác nhận container", at)
+	} else {
+		s.transitionLocked(&job, domain.JobAssigned, placement.Reason, at)
+		job.Assignment = &domain.Assignment{
+			ServerID: placement.ServerID, GPUUUIDs: append([]string(nil), placement.GPUUUIDs...),
+			CommandID: command.ID, AssignedAt: at,
+			ReservationState: "RESERVED", Strategy: placement.Strategy, Score: placement.Score, Reason: placement.Reason,
+		}
 	}
 	job.Policy = placement.Policy
 	job.UpdatedAt = at
@@ -359,13 +411,20 @@ func (s *Store) LeaseCommands(_ context.Context, agentID string, now time.Time, 
 		if command.AgentID != agentID {
 			continue
 		}
+		if command.Type == domain.CommandStartContainer && !s.startDeliverableLocked(command, now) {
+			continue
+		}
 		if command.Type == domain.CommandStopContainer {
 			var stop struct{ JobID string }
 			_ = json.Unmarshal(command.Payload, &stop)
 			job := s.jobs[stop.JobID]
 			if job.Assignment != nil {
 				start := s.commands[job.Assignment.CommandID]
-				if start.Status == domain.CommandPending || start.Status == domain.CommandDelivered {
+				window := job.Assignment.Window()
+				expired := window.Valid() && !now.Before(window.EndAt)
+				// After expiration never redeliver START. The Agent's serial executor
+				// can process STOP after any in-flight START, even if its ACK was lost.
+				if start.Status == domain.CommandPending || (start.Status == domain.CommandDelivered && !expired) {
 					continue
 				}
 			}
@@ -420,6 +479,7 @@ func (s *Store) AckCommand(_ context.Context, agentID, commandID string, ack dom
 }
 
 func cloneServer(value domain.Server) domain.Server {
+	value.Capabilities = value.Capabilities.Clone()
 	value.Labels = cloneMap(value.Labels)
 	value.GPUs = cloneGPUs(value.GPUs)
 	value.Containers = cloneContainers(value.Containers)

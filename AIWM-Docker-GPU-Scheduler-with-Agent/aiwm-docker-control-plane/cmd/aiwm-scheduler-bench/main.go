@@ -51,7 +51,7 @@ func simulate(strategy domain.SchedulingStrategy) result {
 		}
 	}
 	for index, count := range requests {
-		job := domain.Job{ID: fmt.Sprintf("job-%02d", index), Strategy: strategy, Resources: domain.ResourceRequest{GPUCount: count, GPUModel: "A100"}}
+		job := domain.Job{OrganizationID: "benchmark-org", ID: fmt.Sprintf("job-%02d", index), Strategy: strategy, Resources: domain.ResourceRequest{GPUCount: count, GPUModel: "A100"}}
 		placement, err := scheduler.Plan(job, servers, now)
 		if err != nil {
 			metrics.QueuedJobs++
@@ -85,7 +85,7 @@ func fixtureServers(now time.Time) []domain.Server {
 	freeCounts := []int{3, 4, 2, 1, 4}
 	servers := make([]domain.Server, 0, len(freeCounts))
 	for serverIndex, freeCount := range freeCounts {
-		server := domain.Server{ID: fmt.Sprintf("server-%d", serverIndex), Name: fmt.Sprintf("server-%d", serverIndex), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now}
+		server := domain.Server{OrganizationID: "benchmark-org", ID: fmt.Sprintf("server-%d", serverIndex), Name: fmt.Sprintf("server-%d", serverIndex), Status: domain.ServerOnline, LastHeartbeatAt: now, InventoryReceivedAt: now}
 		for gpuIndex := 0; gpuIndex < 4; gpuIndex++ {
 			state := domain.GPUOccupiedLegacy
 			if gpuIndex < freeCount {

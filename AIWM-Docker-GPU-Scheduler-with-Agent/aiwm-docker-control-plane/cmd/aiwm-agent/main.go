@@ -2,10 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent"
@@ -19,9 +22,18 @@ import (
 const agentVersion = "0.2.0"
 
 func main() {
+	showVersion := flag.Bool("version", false, "print Agent version and platform, then exit")
 	checkOnly := flag.Bool("check", false, "verify Docker Engine and NVML access, print inventory, then exit")
 	flag.Parse()
-	configuration, err := agentconfig.Load()
+	if *showVersion {
+		fmt.Printf("aiwm-agent %s (%s/%s)\n", agentVersion, runtime.GOOS, runtime.GOARCH)
+		return
+	}
+	loadConfig := agentconfig.Load
+	if *checkOnly {
+		loadConfig = agentconfig.LoadForCheck
+	}
+	configuration, err := loadConfig()
 	if err != nil {
 		slog.Error("load agent configuration", "error", err)
 		os.Exit(1)
@@ -34,26 +46,20 @@ func main() {
 		os.Exit(1)
 	}
 	defer docker.Close()
-	gpuReader, err := gpu.New()
-	if err != nil {
-		logger.Error("initialize NVIDIA NVML adapter", "error", err)
-		os.Exit(1)
-	}
+	gpuReader := gpu.NewRecovering()
 	defer gpuReader.Close()
-	collector := agent.NewInventoryCollector(docker, gpuReader, agent.ProcCgroupResolver{}, configuration.InventoryPolicy)
+	checkCtx, cancelCheck := context.WithTimeout(context.Background(), configuration.RequestTimeout)
+	compatibility := agent.Preflight(checkCtx, docker, gpuReader, nil, configuration.MachineID)
+	cancelCheck()
 	if *checkOnly {
-		if err := docker.Ping(context.Background()); err != nil {
-			logger.Error("Docker Engine preflight failed", "error", err)
+		_ = json.NewEncoder(os.Stdout).Encode(compatibility)
+		if !compatibility.ManagedExecutionReady {
 			os.Exit(1)
 		}
-		report, err := collector.Snapshot(context.Background(), 1)
-		if err != nil {
-			logger.Error("inventory preflight failed", "error", err)
-			os.Exit(1)
-		}
-		logger.Info("agent preflight passed", "docker_version", report.DockerVersion, "gpus", len(report.GPUs), "containers", len(report.Containers), "gpu_processes", len(report.Processes))
 		return
 	}
+	logger.Info("Agent capability discovery", "mode", compatibility.OperatingMode, "managed_execution_ready", compatibility.ManagedExecutionReady, "reasons", compatibility.Reasons)
+	collector := agent.NewInventoryCollector(docker, gpuReader, agent.ProcCgroupResolver{}, configuration.InventoryPolicy)
 	controlPlane, err := agentcp.New(configuration.ControlPlaneURL, configuration.RequestTimeout, agentcp.TLSConfig{
 		CAFile: configuration.TLSCAFile, CertFile: configuration.TLSCertFile, KeyFile: configuration.TLSKeyFile,
 	})

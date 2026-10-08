@@ -18,6 +18,15 @@ func TestCatalogFP8ResolutionAndUnknownModels(t *testing.T) {
 		{"a100-equivalent", true, "A100", false},
 		{"general", false, "Tesla T4", true},
 		{"general", false, "unknown-new-model", false},
+		{"AUTO", false, "unknown-new-model", true},
+		{"AUTO", true, "unknown-new-model", false},
+		{"AUTO", false, "A100", true},
+		{"AUTO", true, "A100", false},
+		{"AUTO", true, "L40S", true},
+		{"HIGH_PERFORMANCE", false, "A100", false},
+		{"HIGH_PERFORMANCE", false, "H100", true},
+		{"HIGH_PERFORMANCE", true, "H200", true},
+		{"HIGH_PERFORMANCE", true, "L40S", false},
 	} {
 		models, err := catalog.Resolve(tc.profile, tc.fp8)
 		if err != nil {
@@ -30,6 +39,10 @@ func TestCatalogFP8ResolutionAndUnknownModels(t *testing.T) {
 	}
 	if _, err := catalog.Resolve("unknown", false); err == nil {
 		t.Fatal("unknown profile accepted")
+	}
+	profiles := catalog.Profiles()
+	if len(profiles) != 2 || profiles[0].ID != "AUTO" || profiles[1].ID != "HIGH_PERFORMANCE" {
+		t.Fatalf("public profiles: %+v", profiles)
 	}
 	// Caller mutation cannot change the catalog.
 	models, _ := catalog.Resolve("general", false)
