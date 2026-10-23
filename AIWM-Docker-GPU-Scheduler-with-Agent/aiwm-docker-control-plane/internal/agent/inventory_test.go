@@ -18,7 +18,7 @@ func TestInventoryClassifiesLegacyAndMapsNVMLProcess(t *testing.T) {
 		gpus:      []agentv1.GPU{testGPU("GPU-0"), testGPU("GPU-1"), testGPU("GPU-2")},
 		processes: []agentv1.GPUProcess{{PID: 42, GPUUUID: "GPU-1", UsedMemoryMiB: 1024}},
 	}
-	collector := NewInventoryCollector(runtime, reader, fakeResolver{id: "managed-container-2"})
+	collector := newTestCollector(runtime, reader, fakeResolver{id: "managed-container-2"})
 	report, err := collector.Snapshot(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +37,7 @@ func TestInventoryClassifiesLegacyAndMapsNVMLProcess(t *testing.T) {
 func TestUnboundedLegacyGPUGrantProtectsWholeServer(t *testing.T) {
 	runtime := &fakeRuntime{containers: []RuntimeContainer{{ID: "old", State: "running", UnboundedGPUAccess: true}}}
 	reader := fakeGPUReader{gpus: []agentv1.GPU{testGPU("GPU-0"), testGPU("GPU-1")}}
-	report, err := NewInventoryCollector(runtime, reader, nil).Snapshot(context.Background(), 1)
+	report, err := newTestCollector(runtime, reader, nil).Snapshot(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestGPUAvailabilityRejectsLegacyAndUnmappedProcesses(t *testing.T) {
 		gpus:      []agentv1.GPU{testGPU("GPU-0"), testGPU("GPU-1"), testGPU("GPU-2")},
 		processes: []agentv1.GPUProcess{{PID: 77, GPUUUID: "GPU-1"}},
 	}
-	collector := NewInventoryCollector(runtime, reader, fakeResolver{err: errors.New("not in Docker")})
+	collector := newTestCollector(runtime, reader, fakeResolver{err: errors.New("not in Docker")})
 	for _, uuid := range []string{"GPU-0", "GPU-1"} {
 		if err := collector.GPUsAvailable(context.Background(), []string{uuid}, "job-new"); !errors.Is(err, ErrUnsafeGPU) {
 			t.Fatalf("GPUsAvailable(%s) error = %v", uuid, err)

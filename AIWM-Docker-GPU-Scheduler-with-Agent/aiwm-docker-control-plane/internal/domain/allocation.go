@@ -78,6 +78,10 @@ func (r AllocationResources) Domain() ResourceRequest {
 // CapabilityMatches is shared by planning and atomic commit. Resolved models are
 // trusted backend data pinned at admission, persisted with the immutable request.
 func (r ResourceRequest) CapabilityMatches(g GPU) bool {
+	// AUTO has no model restriction unless a known FP8 capability is required.
+	if r.PerformanceProfile == "AUTO" && !r.FP8Required {
+		return true
+	}
 	if r.PerformanceProfile != "" || r.FP8Required {
 		for _, model := range r.ResolvedModels {
 			if strings.EqualFold(strings.TrimSpace(g.Model), model) {

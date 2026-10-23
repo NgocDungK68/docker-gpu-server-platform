@@ -1,14 +1,15 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSession } from "@/features/identity/session";
 import { api } from "@/lib/api/api-client";
 import { queryKeys } from "@/lib/api/query-keys";
 import type { ContainerOrigin } from "@/lib/api/types";
 
-export const useServers = () => useQuery({ queryKey: queryKeys.servers, queryFn: api.getServers });
+export function useServers() { const { organizationFilter } = useSession(); return useQuery({ queryKey: [...queryKeys.servers, organizationFilter], queryFn: () => api.getServers(organizationFilter) }); }
 export const useServer = (id: string) => useQuery({ queryKey: queryKeys.server(id), queryFn: () => api.getServer(id), enabled: Boolean(id) });
-export const useGPUs = () => useQuery({ queryKey: queryKeys.gpus, queryFn: api.getGPUs });
-export const useContainers = (origin?: ContainerOrigin) => useQuery({ queryKey: queryKeys.containers(origin), queryFn: () => api.getContainers(origin) });
+export function useGPUs() { const { organizationFilter } = useSession(); return useQuery({ queryKey: [...queryKeys.gpus, organizationFilter], queryFn: () => api.getGPUs(organizationFilter) }); }
+export function useContainers(origin?: ContainerOrigin) { const { organizationFilter } = useSession(); return useQuery({ queryKey: [...queryKeys.containers(origin), organizationFilter], queryFn: () => api.getContainers(origin, organizationFilter) }); }
 
 export function useDrainServer(id: string) {
   const client = useQueryClient();

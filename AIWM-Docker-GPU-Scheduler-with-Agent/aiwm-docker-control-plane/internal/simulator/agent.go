@@ -181,3 +181,8 @@ func (r *Runtime) saveLocked() error {
 	}
 	return os.Rename(name, r.path)
 }
+
+// Compatibility describes the simulator runtime; hardware observation still uses mock NVML.
+func (r *Runtime) Compatibility(context.Context) (agent.RuntimeCompatibility, error) {
+	return agent.RuntimeCompatibility{Version: "simulated-docker/nvml-mock", APIVersion: "sim-v1", OS: "linux", NVIDIARuntime: true}, nil
+}

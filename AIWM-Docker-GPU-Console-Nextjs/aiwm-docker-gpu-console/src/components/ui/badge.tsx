@@ -1,3 +1,4 @@
+import { statusLabels } from "@/lib/utils/display";
 import { cn } from "@/lib/utils/cn";
 
 const toneMap: Record<string, string> = {
@@ -8,5 +9,5 @@ const toneMap: Record<string, string> = {
 };
 
 export function Badge({ value, label, className }: { value: string; label?: string; className?: string }) {
-  return <span className={cn("badge", toneMap[value] ?? "badge-neutral", className)}>{label ?? (value === "LEGACY" ? "External" : value.replaceAll("_", " "))}</span>;
+  return <span className={cn("badge", toneMap[value.toUpperCase()] ?? "badge-neutral", className)}>{label ?? (statusLabels[value.toUpperCase()] ?? value.replaceAll("_", " "))}</span>;
 }

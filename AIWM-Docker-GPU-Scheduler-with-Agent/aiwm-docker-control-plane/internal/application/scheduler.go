@@ -85,17 +85,23 @@ func (s Scheduler) Plan(job domain.Job, servers []domain.Server, now time.Time) 
 // filter reports the furthest satisfied constraint so queued jobs have actionable reasons.
 func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time) ([]candidate, string) {
 	result := make([]candidate, 0)
-	online, labels, model, healthy, available, vram := false, false, false, false, false, false
+	online, model, healthy, available, vram := false, false, false, false, false
 	external, unknown := false, false
+	executionUnavailable := false
+	sameOrganization := false
 	for _, server := range servers {
+		if !domain.SameOrganization(job.OrganizationID, server.OrganizationID) {
+			continue
+		}
+		sameOrganization = true
+		if server.Capabilities == nil || !server.Capabilities.ManagedExecutionReady {
+			executionUnavailable = true
+			continue
+		}
 		if !server.Schedulable(now, s.offlineAfter) {
 			continue
 		}
 		online = true
-		if !labelsMatch(server.Labels, job.ServerSelector) {
-			continue
-		}
-		labels = true
 		for _, gpu := range server.GPUs {
 			if !job.Resources.CapabilityMatches(gpu) {
 				continue
@@ -122,10 +128,12 @@ func (s Scheduler) filter(job domain.Job, servers []domain.Server, now time.Time
 	}
 	reason := "insufficient GPU count on one server"
 	switch {
+	case !sameOrganization:
+		reason = "no server satisfies organization ownership"
+	case !online && executionUnavailable:
+		reason = "managed GPU execution unavailable"
 	case !online:
 		reason = "no online agent with fresh inventory (offline, drained or inventory unavailable)"
-	case !labels:
-		reason = "no server matches the requested labels"
 	case !model:
 		reason = "GPU model unavailable for performance profile / FP8 requirement"
 	case !healthy:
@@ -196,13 +204,4 @@ func freeGPUCount(server domain.Server) int {
 		}
 	}
 	return free
-}
-
-func labelsMatch(actual, requested map[string]string) bool {
-	for key, value := range requested {
-		if actual[key] != value {
-			return false
-		}
-	}
-	return true
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -37,7 +38,12 @@ type Runner struct {
 	persistent  PersistentState
 	registerMu  sync.Mutex
 	inventoryMu sync.Mutex
+	stateErr    error
+	cancel      context.CancelCauseFunc
 }
+
+// errLocalState marks a durability failure; continuing could break identity or idempotency.
+var errLocalState = errors.New("agent local state persistence failed")
 
 func NewRunner(config RunnerConfig, client ControlPlaneClient, inventory InventorySource, executor *CommandExecutor, state StateStore, docker DockerRuntime, logger *slog.Logger) *Runner {
 	if config.CommandLimit <= 0 {
@@ -46,13 +52,27 @@ func NewRunner(config RunnerConfig, client ControlPlaneClient, inventory Invento
 	if config.MaxCommandHistory <= 0 {
 		config.MaxCommandHistory = 1000
 	}
+	if collector, ok := inventory.(*InventoryCollector); ok {
+		collector.machineID = config.MachineID
+	}
 	return &Runner{config: config, client: client, inventory: inventory, executor: executor, state: state, docker: docker, logger: logger}
 }
 
 func (r *Runner) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	r.mu.Lock()
+	r.cancel = cancel
+	r.mu.Unlock()
 	loaded, err := r.state.Load()
 	if err != nil {
 		return fmt.Errorf("load agent state: %w", err)
+	}
+	if r.config.MachineID == "" || ((loaded.AgentID != "" || loaded.AgentToken != "" || loaded.InventorySequence != 0 || len(loaded.ProcessedCommands) != 0) && loaded.MachineID == "") {
+		return errors.New("agent state requires a verifiable machine identity")
+	}
+	if (loaded.AgentID == "") != (loaded.AgentToken == "") {
+		return errors.New("agent state contains incomplete credentials")
 	}
 	if loaded.MachineID != "" && loaded.MachineID != r.config.MachineID {
 		return fmt.Errorf("state belongs to machine %q, current machine is %q", loaded.MachineID, r.config.MachineID)
@@ -61,27 +81,33 @@ func (r *Runner) Run(ctx context.Context) error {
 		loaded.ProcessedCommands = make(map[string]CommandResult)
 	}
 	loaded.MachineID = r.config.MachineID
+	// Identity storage is required even when observation subsystems are unavailable.
+	if err := r.state.Save(loaded); err != nil {
+		return fmt.Errorf("initialize writable agent state: %w", err)
+	}
 	r.mu.Lock()
 	r.persistent = loaded
 	r.mu.Unlock()
 
+	attempt := 0
 	for {
-		err := r.docker.Ping(ctx)
-		if err == nil {
-			err = r.ensureRegistered(ctx, "")
-		}
+		err := r.ensureRegistered(ctx, loaded.AgentID)
 		if err == nil {
 			err = r.reportInventory(ctx)
 		}
 		if err == nil {
 			break
 		}
-		r.logger.Warn("agent startup awaiting Docker/control-plane/inventory", "error", err)
+		if errors.Is(err, errLocalState) {
+			return err
+		}
+		r.logger.Warn("agent startup awaiting control-plane/inventory", "error", err)
 		select {
 		case <-ctx.Done():
-			return nil
-		case <-time.After(r.config.HeartbeatEvery):
+			return r.stateFailure()
+		case <-time.After(retryDelay(r.config.HeartbeatEvery, attempt)):
 		}
+		attempt++
 	}
 
 	r.logger.Info("AIWM agent started", "agent_id", r.identity().AgentID, "machine_id", r.config.MachineID)
@@ -92,12 +118,13 @@ func (r *Runner) Run(ctx context.Context) error {
 	go func() { defer workers.Done(); r.commandLoop(ctx) }()
 	<-ctx.Done()
 	workers.Wait()
-	return nil
+	return r.stateFailure()
 }
 
 func (r *Runner) heartbeatLoop(ctx context.Context) {
-	ticker := time.NewTicker(r.config.HeartbeatEvery)
+	ticker := time.NewTimer(r.config.HeartbeatEvery)
 	defer ticker.Stop()
+	attempt := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -108,8 +135,18 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 			if errors.Is(err, ErrUnauthorized) {
 				err = r.ensureRegistered(ctx, identity.AgentID)
 			}
+			if err == nil && attempt > 0 {
+				err = r.reportInventory(ctx)
+			}
 			if err != nil && !errors.Is(err, context.Canceled) {
 				r.logger.Warn("heartbeat failed", "error", err)
+			}
+			if err != nil {
+				ticker.Reset(retryDelay(r.config.HeartbeatEvery, attempt))
+				attempt++
+			} else {
+				attempt = 0
+				ticker.Reset(r.config.HeartbeatEvery)
 			}
 		}
 	}
@@ -118,7 +155,11 @@ func (r *Runner) heartbeatLoop(ctx context.Context) {
 func (r *Runner) inventoryLoop(ctx context.Context) {
 	ticker := time.NewTicker(r.config.InventoryEvery)
 	defer ticker.Stop()
-	events, eventErrors := r.docker.WatchContainerEvents(ctx)
+	var events <-chan struct{}
+	var eventErrors <-chan error
+	if r.docker != nil {
+		events, eventErrors = r.docker.WatchContainerEvents(ctx)
+	}
 	var debounce <-chan time.Time
 	for {
 		select {
@@ -147,15 +188,24 @@ func (r *Runner) inventoryLoop(ctx context.Context) {
 }
 
 func (r *Runner) commandLoop(ctx context.Context) {
-	ticker := time.NewTicker(r.config.CommandPollEvery)
+	ticker := time.NewTimer(r.config.CommandPollEvery)
 	defer ticker.Stop()
+	attempt := 0
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := r.pollAndExecute(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			err := r.pollAndExecute(ctx)
+			if err != nil && !errors.Is(err, context.Canceled) {
 				r.logger.Warn("command poll failed", "error", err)
+			}
+			if err != nil {
+				ticker.Reset(retryDelay(r.config.CommandPollEvery, attempt))
+				attempt++
+			} else {
+				attempt = 0
+				ticker.Reset(r.config.CommandPollEvery)
 			}
 		}
 	}
@@ -197,15 +247,27 @@ func (r *Runner) reportInventory(ctx context.Context) error {
 }
 
 func (r *Runner) pollAndExecute(ctx context.Context) error {
+	if err := r.stateFailure(); err != nil {
+		return err
+	}
 	identity := r.identity()
 	commands, err := r.client.PollCommands(ctx, identity.AgentID, identity.AgentToken, r.config.CommandLimit)
 	if errors.Is(err, ErrUnauthorized) {
-		return r.ensureRegistered(ctx, identity.AgentID)
+		if err := r.ensureRegistered(ctx, identity.AgentID); err != nil {
+			return err
+		}
+		return r.reportInventory(ctx)
 	}
 	if err != nil {
 		return err
 	}
 	for _, command := range commands {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := r.stateFailure(); err != nil {
+			return err
+		}
 		ack, processed := r.processed(command.ID)
 		if !processed {
 			ack = r.executor.Execute(ctx, command)
@@ -214,6 +276,9 @@ func (r *Runner) pollAndExecute(ctx context.Context) error {
 			}
 		}
 		identity = r.identity()
+		if err := r.stateFailure(); err != nil {
+			return err
+		}
 		if err := r.client.AckCommand(ctx, identity.AgentID, identity.AgentToken, command.ID, ack); err != nil {
 			return err
 		}
@@ -221,6 +286,9 @@ func (r *Runner) pollAndExecute(ctx context.Context) error {
 		// Publish the resulting actual state immediately. Periodic and
 		// Docker-event inventory remain safety nets if this request fails.
 		if err := r.reportInventory(ctx); err != nil {
+			if errors.Is(err, errLocalState) {
+				return err
+			}
 			r.logger.Warn("post-command inventory failed", "command_id", command.ID, "error", err)
 		}
 	}
@@ -237,10 +305,26 @@ func (r *Runner) ensureRegistered(ctx context.Context, failedAgentID string) err
 	if current.AgentID != "" && failedAgentID == "" {
 		return nil
 	}
+	report, err := r.inventory.Snapshot(ctx, 1)
+	if err != nil {
+		return fmt.Errorf("probe agent capabilities: %w", err)
+	}
+	capabilities := []string{}
+	if report.Capabilities != nil {
+		if report.Capabilities.DockerAvailable {
+			capabilities = append(capabilities, "docker-inventory")
+		}
+		if report.Capabilities.GPUInventoryAvailable {
+			capabilities = append(capabilities, "nvml-inventory")
+		}
+		if report.Capabilities.ManagedExecutionReady {
+			capabilities = append(capabilities, "managed-container-v1")
+		}
+	}
 	response, err := r.client.Register(ctx, agentv1.RegisterRequest{
 		ProtocolVersion: agentv1.ProtocolVersion, MachineID: r.config.MachineID, Name: r.config.Name,
 		AgentVersion: r.config.AgentVersion, Labels: cloneMap(r.config.Labels),
-		Capabilities: []string{"docker-inventory", "nvml-inventory", "managed-container-v1"},
+		Capabilities: capabilities, CapabilityReport: report.Capabilities,
 	}, r.config.EnrollmentToken)
 	if err != nil {
 		return fmt.Errorf("register agent: %w", err)
@@ -288,5 +372,34 @@ func (r *Runner) remember(commandID string, ack agentv1.CommandAckRequest) error
 }
 
 func (r *Runner) saveLocked() error {
-	return r.state.Save(r.persistent)
+	if r.stateErr != nil {
+		return r.stateErr
+	}
+	if err := r.state.Save(r.persistent); err != nil {
+		r.stateErr = fmt.Errorf("%w: %w", errLocalState, err)
+		if r.cancel != nil {
+			r.cancel(r.stateErr)
+		}
+	}
+	return r.stateErr
+}
+
+func (r *Runner) stateFailure() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.stateErr
+}
+
+// retryDelay giới hạn 60 giây, jitter nửa trên để tránh các Agent retry đồng loạt.
+func retryDelay(base time.Duration, attempt int) time.Duration {
+	if base < time.Second {
+		base = time.Second
+	}
+	for i := 0; i < attempt && base < 30*time.Second; i++ {
+		base *= 2
+	}
+	if base > 60*time.Second {
+		base = 60 * time.Second
+	}
+	return base/2 + time.Duration(rand.Int64N(int64(base/2)+1))
 }

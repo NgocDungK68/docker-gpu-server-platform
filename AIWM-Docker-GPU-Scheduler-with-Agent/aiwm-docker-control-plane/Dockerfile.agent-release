@@ -1,0 +1,18 @@
+# Build trên máy AIWM/CI, không chạy trên GPU host.
+FROM golang:1.26.6-bookworm AS toolchain
+FROM buildpack-deps:bullseye AS build
+COPY --from=toolchain /usr/local/go /usr/local/go
+ENV PATH=/usr/local/go/bin:$PATH
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG CONTROL_PLANE_URL=
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -trimpath \
+    -ldflags="-s -w -X github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agent/config.ReleaseControlPlaneURL=${CONTROL_PLANE_URL}" \
+    -o /out/aiwm-agent ./cmd/aiwm-agent
+RUN /out/aiwm-agent --version > /out/BUILD_INFO.txt \
+    && getconf GNU_LIBC_VERSION >> /out/BUILD_INFO.txt \
+    && printf 'ControlPlaneURL=%s\n' "${CONTROL_PLANE_URL:-http://localhost:8080}" >> /out/BUILD_INFO.txt
+FROM scratch AS artifact
+COPY --from=build /out/ /

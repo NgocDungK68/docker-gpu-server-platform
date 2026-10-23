@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/platform"
+
 	agentv1 "github.com/VDT-AI-2026/aiwm-docker-control-plane/internal/agentprotocol/v1"
 )
 
@@ -15,11 +17,13 @@ type ProcessContainerResolver interface {
 }
 
 type InventoryCollector struct {
-	docker   DockerRuntime
-	gpus     GPUReader
-	resolver ProcessContainerResolver
-	now      func() time.Time
-	policy   InventoryPolicy
+	platform  func() platform.Capabilities
+	machineID string
+	docker    DockerRuntime
+	gpus      GPUReader
+	resolver  ProcessContainerResolver
+	now       func() time.Time
+	policy    InventoryPolicy
 }
 
 // InventoryPolicy controls conservative accounting for unattributed GPU telemetry.
@@ -28,31 +32,29 @@ type InventoryPolicy struct {
 	UnknownUtilizationPct float64
 }
 
-// NewInventoryCollector joins Docker grants and NVML processes into a complete snapshot.
+// NewInventoryCollector joins available sources and marks unavailable subsets explicitly.
 func NewInventoryCollector(docker DockerRuntime, gpus GPUReader, resolver ProcessContainerResolver, policies ...InventoryPolicy) *InventoryCollector {
 	policy := InventoryPolicy{UnknownMemoryMiB: 256, UnknownUtilizationPct: 5}
 	if len(policies) > 0 {
 		policy = policies[0]
 	}
-	return &InventoryCollector{docker: docker, gpus: gpus, resolver: resolver, now: time.Now, policy: policy}
+	return &InventoryCollector{platform: discoverPlatform, docker: docker, gpus: gpus, resolver: resolver, now: time.Now, policy: policy}
 }
 
 func (c *InventoryCollector) Snapshot(ctx context.Context, sequence uint64) (agentv1.InventoryReport, error) {
 	if sequence == 0 {
 		return agentv1.InventoryReport{}, fmt.Errorf("inventory sequence must be positive")
 	}
-	containers, err := c.docker.ListContainers(ctx)
-	if err != nil {
-		return agentv1.InventoryReport{}, fmt.Errorf("list Docker containers: %w", err)
+	base := c.platform()
+	if c.machineID != "" {
+		base.MachineIDAvailable = true
+		base.AgentOperational = true
 	}
-	gpus, processes, err := c.gpus.Snapshot(ctx)
-	if err != nil {
-		return agentv1.InventoryReport{}, fmt.Errorf("read NVML inventory: %w", err)
+	sources := collectSources(ctx, c.docker, c.gpus, base)
+	if err := ctx.Err(); err != nil {
+		return agentv1.InventoryReport{}, err
 	}
-	dockerVersion, err := c.docker.Version(ctx)
-	if err != nil {
-		return agentv1.InventoryReport{}, fmt.Errorf("read Docker version: %w", err)
-	}
+	containers, gpus, processes := sources.containers, sources.gpus, sources.processes
 
 	allGPUUUIDs := make([]string, 0, len(gpus))
 	for _, gpu := range gpus {
@@ -106,6 +108,9 @@ func (c *InventoryCollector) Snapshot(ctx context.Context, sequence uint64) (age
 	}
 
 	for index := range processes {
+		if !sources.capabilities.DockerAvailable {
+			processes[index].ContainerID = ""
+		}
 		if processes[index].ContainerID == "" && c.resolver != nil {
 			containerID, resolveErr := c.resolver.ContainerID(processes[index].PID)
 			if resolveErr == nil {
@@ -138,8 +143,9 @@ func (c *InventoryCollector) Snapshot(ctx context.Context, sequence uint64) (age
 	}
 	return agentv1.InventoryReport{
 		Host:     discoverHost(),
-		Sequence: sequence, ObservedAt: c.now().UTC(), DockerVersion: dockerVersion,
-		GPUs: gpus, Containers: wireContainers, Processes: processes,
+		Sequence: sequence, ObservedAt: c.now().UTC(), DockerVersion: sources.capabilities.DockerVersion,
+		Capabilities: sources.capabilities.Clone(),
+		GPUs:         gpus, Containers: wireContainers, Processes: processes,
 	}, nil
 }
 
@@ -147,6 +153,9 @@ func (c *InventoryCollector) GPUsAvailable(ctx context.Context, wanted []string,
 	report, err := c.Snapshot(ctx, 1)
 	if err != nil {
 		return err
+	}
+	if report.Capabilities == nil || !report.Capabilities.ManagedExecutionReady {
+		return fmt.Errorf("%w: managed GPU execution is unavailable", ErrUnsafeGPU)
 	}
 	known := make(map[string]bool, len(report.GPUs))
 	occupied := make(map[string]bool)

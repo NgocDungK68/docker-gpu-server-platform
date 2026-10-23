@@ -3,6 +3,7 @@ package domain
 import "errors"
 
 var (
+	ErrForbidden       = errors.New("access forbidden")
 	ErrNotFound        = errors.New("resource not found")
 	ErrConflict        = errors.New("resource state conflict")
 	ErrUnauthorized    = errors.New("unauthorized agent")

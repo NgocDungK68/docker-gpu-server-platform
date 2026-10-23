@@ -1,12 +1,11 @@
-# Standalone Control Plane only. For two agents + UI use workspace root compose.yaml.
+# Control Plane dùng PostgreSQL bên ngoài; demo đủ stack dùng compose.yaml ở workspace root.
 services:
   control-plane:
     build: .
     environment:
       AIWM_HTTP_ADDR: ":8080"
       AIWM_STATE_FILE: /data/control-plane.gob
-      AIWM_API_TOKEN: ${AIWM_API_TOKEN:?Set API token in .env}
-      AIWM_ENROLLMENT_TOKEN: ${AIWM_ENROLLMENT_TOKEN:?Set enrollment token in .env}
+      AIWM_DATABASE_URL: ${AIWM_DATABASE_URL:?Configure database accessible from this container}
     ports:
       - "127.0.0.1:8080:8080"
     volumes:

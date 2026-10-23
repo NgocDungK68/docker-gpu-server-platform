@@ -30,7 +30,7 @@ export const navigation: NavigationGroup[] = [
     items: [
       { label: "Tổng quan", href: "/", icon: Gauge },
       { label: "Máy chủ", href: "/servers", icon: Server },
-      { label: "GPU inventory", href: "/gpus", icon: Cpu },
+      { label: "GPU", href: "/gpus", icon: Cpu },
       { label: "Containers", href: "/containers", icon: Container },
     ],
   },
@@ -40,14 +40,14 @@ export const navigation: NavigationGroup[] = [
       { label: "Workloads", href: "/workloads", icon: Boxes },
       { label: "Tạo workload", href: "/workloads/new", icon: PlusSquare },
       { label: "Hàng đợi", href: "/queue", icon: ListOrdered },
-      { label: "Scheduler Lab", href: "/scheduler", icon: SlidersHorizontal },
+      { label: "Lịch cấp phát", href: "/scheduler", icon: SlidersHorizontal },
     ],
   },
   {
     label: "Quản trị",
     items: [
-      { label: "Onboard Agent", href: "/onboarding", icon: Network },
-      { label: "Cấu hình", href: "/settings", icon: Settings },
+      { label: "Kết nối máy chủ", href: "/onboarding", icon: Network },
+      { label: "Hệ thống", href: "/settings", icon: Settings },
     ],
   },
 ];

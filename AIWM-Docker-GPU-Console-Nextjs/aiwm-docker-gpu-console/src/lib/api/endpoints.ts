@@ -10,6 +10,8 @@ export const endpoints = {
   jobPreview: "/jobs/preview",
   job: (jobId: string) => `/jobs/${jobId}`,
   stopJob: (jobId: string) => `/jobs/${jobId}/stop`,
+  continueJob: (jobId: string) => `/jobs/${jobId}/continue`,
+  artifact: (jobId: string) => `/jobs/${jobId}/artifact`,
   queue: "/queue",
   runScheduler: "/scheduler/run-once",
 } as const;
